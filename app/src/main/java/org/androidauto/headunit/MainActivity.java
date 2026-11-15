@@ -394,8 +394,9 @@ public final class MainActivity extends Activity {
                     android.net.wifi.WifiConfiguration config = reservation.getWifiConfiguration();
                     String ssid = config != null ? config.SSID : "(SSID unavailable)";
                     String key = config != null ? config.preSharedKey : "(password unavailable)";
-                    setStatus("Temporary Wi-Fi hotspot started. SSID: " + ssid + "  Password: " + key
-                            + "\nAndroid selects the band. This is a capability test, not Android Auto Wi-Fi handoff.");
+                    setStatus("Wi-Fi hotspot ready. SSID: " + ssid + "  Password: " + key
+                            + "\nAndroid selects the band. OLA Play is starting the Android Auto Bluetooth handoff.");
+                    if (connectionPill != null) connectionPill.setText("WAITING FOR PHONE");
                 }
                 @Override public void onStopped() {
                     hotspot = null;
