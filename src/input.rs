@@ -22,7 +22,16 @@ enum InputMessage {
 impl From<InputMessage> for AndroidAutoFrame {
     fn from(value: InputMessage) -> Self {
         match value {
-            InputMessage::BindingRequest(_, _) => unimplemented!(),
+            InputMessage::BindingRequest(chan, m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::input_channel_message::Enum::BINDING_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame {
+                    header: FrameHeader { channel_id: chan, frame: FrameHeaderContents::new(true, FrameHeaderType::Single, false) },
+                    data: frame_data,
+                }
+            }
             InputMessage::BindingResponse(chan, m) => {
                 let mut data = m.write_to_bytes().unwrap();
                 let t = Wifi::input_channel_message::Enum::BINDING_RESPONSE as u16;
@@ -63,6 +72,9 @@ impl TryFrom<&AndroidAutoFrame> for InputMessage {
     type Error = String;
     fn try_from(value: &AndroidAutoFrame) -> Result<Self, Self::Error> {
         use protobuf::Enum;
+        if value.data.len() < 2 {
+            return Err("Input-channel frame is shorter than its 2-byte message type".to_string());
+        }
         let mut ty = [0u8; 2];
         ty.copy_from_slice(&value.data[0..2]);
         let ty = u16::from_be_bytes(ty);
@@ -183,6 +195,6 @@ impl ChannelHandlerTrait for InputChannelHandler {
             }
             return Ok(());
         }
-        todo!();
+        Err(super::FrameIoError::SslSession(format!("Unrecognized input-channel message on channel {}: {:x?}", channel, msg.data)))
     }
 }
