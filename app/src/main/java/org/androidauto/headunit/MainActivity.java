@@ -595,10 +595,17 @@ public final class MainActivity extends Activity {
     private boolean forwardTouch(MotionEvent event) {
         long handle = nativeSessionHandle;
         if (handle == 0 || projectionSurface == null) return false;
-        int index = event.getActionIndex();
-        int x = Math.round(event.getX(index) * 1280f / Math.max(1, projectionSurface.getWidth()));
-        int y = Math.round(event.getY(index) * 720f / Math.max(1, projectionSurface.getHeight()));
-        NativeProjection.nativeTouch(handle, x, y, event.getActionMasked(), event.getPointerId(index));
+        int count = event.getPointerCount();
+        int[] xs = new int[count];
+        int[] ys = new int[count];
+        int[] pointerIds = new int[count];
+        for (int i = 0; i < count; i++) {
+            xs[i] = Math.round(event.getX(i) * 1280f / Math.max(1, projectionSurface.getWidth()));
+            ys[i] = Math.round(event.getY(i) * 720f / Math.max(1, projectionSurface.getHeight()));
+            pointerIds[i] = event.getPointerId(i);
+        }
+        NativeProjection.nativeTouch(handle, xs, ys, pointerIds,
+                event.getActionMasked(), event.getActionIndex());
         return true;
     }
 
