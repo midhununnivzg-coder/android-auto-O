@@ -408,8 +408,8 @@ public final class MainActivity extends Activity {
                     });
                     wirelessBridge.start(reservation);
                     android.net.wifi.WifiConfiguration config = reservation.getWifiConfiguration();
-                    hotspotSsid = config != null ? config.SSID : null;
-                    hotspotPassword = config != null ? config.preSharedKey : null;
+                    hotspotSsid = config != null ? unquoteWifiValue(config.SSID) : null;
+                    hotspotPassword = config != null ? unquoteWifiValue(config.preSharedKey) : null;
                     String ssid = hotspotSsid != null ? hotspotSsid : "(SSID unavailable)";
                     String key = hotspotPassword != null ? hotspotPassword : "(password unavailable)";
                     setStatus("Wi-Fi hotspot ready. SSID: " + ssid + "  Password: " + key
@@ -493,10 +493,18 @@ public final class MainActivity extends Activity {
     }
 
     private String escapeWifiQr(String value) {
-        return value.replace("\\\\", "\\\\\\\\")
-                .replace(";", "\\\\;")
-                .replace(",", "\\\\,")
-                .replace(":", "\\\\:");
+        return value.replace("\\", "\\\\")
+                .replace(";", "\\;")
+                .replace(",", "\\,")
+                .replace(":", "\\:");
+    }
+
+    private String unquoteWifiValue(String value) {
+        if (value == null) return null;
+        if (value.length() >= 2 && value.startsWith("\\\"") && value.endsWith("\\\"")) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
     }
 
     @Override protected void onDestroy() {
