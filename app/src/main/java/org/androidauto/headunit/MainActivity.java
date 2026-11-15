@@ -472,6 +472,7 @@ public final class MainActivity extends Activity {
             ParcelFileDescriptor descriptor = ParcelFileDescriptor.fromSocket(socket);
             long handle = NativeProjection.nativeStart(this, descriptor, 1280, 720);
             descriptor.close();
+            try { socket.close(); } catch (Exception ignored) { }
             nativeSessionHandle = handle;
             if (handle == 0) {
                 setStatus("Native Android Auto engine could not start. Check the session log.");
@@ -754,6 +755,10 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onDestroy() {
+        long handle = nativeSessionHandle;
+        nativeSessionHandle = 0;
+        if (handle != 0) NativeProjection.nativeStop(handle);
+        releaseVideoDecoder();
         if (bluetooth != null && bluetooth.isDiscovering()) bluetooth.cancelDiscovery();
         if (wirelessBridge != null) wirelessBridge.close();
         if (hotspot != null) hotspot.close();
