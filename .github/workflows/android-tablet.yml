@@ -19,6 +19,18 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v3
+        with:
+          ndk-version: 27.2.12479018
+      - name: Install Rust and Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+      - name: Build Android ARM64 Rust engine
+        run: cargo ndk -t arm64-v8a -o app/src/main/jniLibs build --release --no-default-features --features android-jni
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -45,5 +57,5 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
-      - name: Check wireless protocol crate
-        run: cargo check --locked --no-default-features --features wireless
+      - name: Check Android JNI protocol crate
+        run: cargo check --no-default-features --features android-jni
