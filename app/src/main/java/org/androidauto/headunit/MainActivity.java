@@ -108,18 +108,27 @@ public final class MainActivity extends Activity {
         LinearLayout titles = new LinearLayout(this);
         titles.setOrientation(LinearLayout.VERTICAL);
         titles.setPadding(dp(14), 0, 0, 0);
-        TextView heading = text("AURA  /  HEAD UNIT", 21, Color.WHITE, true);
+        TextView heading = text("OLA PLAY", 21, Color.WHITE, true);
         TextView subheading = text("WIRELESS CONNECTIVITY", 10, 0xff9eafcf, true);
         subheading.setLetterSpacing(0.16f);
         titles.addView(heading);
         titles.addView(subheading);
         header.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
 
-        TextView version = text("ANDROID 10  •  ARM64", 10, 0xffc4d8ee, true);
+        LinearLayout rightHeader = new LinearLayout(this);
+        rightHeader.setOrientation(LinearLayout.VERTICAL);
+        rightHeader.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        TextView creator = text("By Midhun Sankar", 11, 0xffd8eaff, true);
+        creator.setGravity(Gravity.RIGHT | Gravity.CENTER_VERTICAL);
+        rightHeader.addView(creator);
+        TextView version = text("ANDROID 10  •  ARM64", 9, 0xffc4d8ee, true);
         version.setGravity(Gravity.CENTER);
-        version.setPadding(dp(12), dp(10), dp(12), dp(10));
+        version.setPadding(dp(10), dp(7), dp(10), dp(7));
         version.setBackground(glassDrawable(0x222c9bd2, 0x5548a9d5, 30));
-        header.addView(version);
+        LinearLayout.LayoutParams versionParams = new LinearLayout.LayoutParams(-2, -2);
+        versionParams.topMargin = dp(5);
+        rightHeader.addView(version, versionParams);
+        header.addView(rightHeader);
         page.addView(header, new LinearLayout.LayoutParams(-1, dp(60)));
         addSpace(page, 18);
 
