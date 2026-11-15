@@ -444,48 +444,106 @@ public final class MainActivity extends Activity {
             Map<EncodeHintType, Object> hints = new EnumMap<>(EncodeHintType.class);
             hints.put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M);
             hints.put(EncodeHintType.MARGIN, 2);
-            android.graphics.Bitmap qrBitmap;
             com.google.zxing.common.BitMatrix matrix =
                     new QRCodeWriter().encode(wifiPayload, BarcodeFormat.QR_CODE, 720, 720, hints);
-            qrBitmap = Bitmap.createBitmap(720, 720, Bitmap.Config.ARGB_8888);
+            Bitmap qrBitmap = Bitmap.createBitmap(720, 720, Bitmap.Config.ARGB_8888);
             for (int y = 0; y < 720; y++) {
                 for (int x = 0; x < 720; x++) {
                     qrBitmap.setPixel(x, y, matrix.get(x, y) ? Color.BLACK : Color.WHITE);
                 }
             }
 
-            LinearLayout content = new LinearLayout(this);
-            content.setOrientation(LinearLayout.VERTICAL);
-            content.setGravity(Gravity.CENTER_HORIZONTAL);
-            content.setPadding(dp(18), dp(8), dp(18), dp(8));
+            LinearLayout shell = new LinearLayout(this);
+            shell.setOrientation(LinearLayout.VERTICAL);
+            shell.setGravity(Gravity.CENTER_HORIZONTAL);
+            shell.setPadding(dp(20), dp(18), dp(20), dp(16));
+            GradientDrawable shellGlass = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    new int[]{0xee182b49, 0xe91b3554, 0xee101d35});
+            shellGlass.setCornerRadius(dp(30));
+            shellGlass.setStroke(dp(1), 0x997fcfff);
+            shell.setBackground(shellGlass);
+            if (Build.VERSION.SDK_INT >= 21) shell.setElevation(dp(18));
+
+            TextView eyebrow = text("WIRELESS SETUP", 10, 0xff8bdcff, true);
+            eyebrow.setLetterSpacing(0.20f);
+            shell.addView(eyebrow);
+            TextView title = text("Connect to OLA Play", 22, Color.WHITE, true);
+            title.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
+            titleParams.topMargin = dp(5);
+            shell.addView(title, titleParams);
+            TextView subtitle = text("Scan once to join the temporary Wi-Fi network", 12, 0xffc6d8ee, false);
+            subtitle.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams subtitleParams = new LinearLayout.LayoutParams(-1, -2);
+            subtitleParams.topMargin = dp(4);
+            subtitleParams.bottomMargin = dp(16);
+            shell.addView(subtitle, subtitleParams);
+
+            LinearLayout qrPlate = new LinearLayout(this);
+            qrPlate.setGravity(Gravity.CENTER);
+            qrPlate.setPadding(dp(12), dp(12), dp(12), dp(12));
+            qrPlate.setBackground(glassDrawable(Color.WHITE, 0xffd9f0ff, 23));
             ImageView qr = new ImageView(this);
             qr.setImageBitmap(qrBitmap);
             qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            content.addView(qr, new LinearLayout.LayoutParams(dp(250), dp(250)));
-            TextView network = text("NETWORK  " + hotspotSsid, 14, Color.WHITE, true);
-            network.setGravity(Gravity.CENTER);
-            network.setPadding(0, dp(10), 0, dp(6));
-            content.addView(network);
-            TextView password = text("PASSWORD  " + hotspotPassword, 14, Color.WHITE, false);
-            password.setGravity(Gravity.CENTER);
+            qrPlate.addView(qr, new LinearLayout.LayoutParams(dp(236), dp(236)));
+            shell.addView(qrPlate);
+
+            LinearLayout details = new LinearLayout(this);
+            details.setOrientation(LinearLayout.VERTICAL);
+            details.setPadding(dp(14), dp(11), dp(14), dp(11));
+            details.setBackground(glassDrawable(0x332f5a82, 0x665ca9d8, 17));
+            LinearLayout.LayoutParams detailsParams = new LinearLayout.LayoutParams(-1, -2);
+            detailsParams.topMargin = dp(15);
+            shell.addView(details, detailsParams);
+
+            TextView networkLabel = text("WI-FI NETWORK", 9, 0xff8bdcff, true);
+            networkLabel.setLetterSpacing(0.14f);
+            details.addView(networkLabel);
+            TextView network = text(hotspotSsid, 15, Color.WHITE, true);
+            network.setPadding(0, dp(3), 0, dp(9));
+            details.addView(network);
+            View separator = new View(this);
+            separator.setBackgroundColor(0x557fbce5);
+            details.addView(separator, new LinearLayout.LayoutParams(-1, dp(1)));
+            TextView passwordLabel = text("PASSWORD", 9, 0xff8bdcff, true);
+            passwordLabel.setLetterSpacing(0.14f);
+            LinearLayout.LayoutParams passwordLabelParams = new LinearLayout.LayoutParams(-1, -2);
+            passwordLabelParams.topMargin = dp(9);
+            details.addView(passwordLabel, passwordLabelParams);
+            TextView password = text(hotspotPassword, 15, 0xfff4f8ff, false);
             password.setTextIsSelectable(true);
-            content.addView(password);
-            TextView hint = text("Scan this QR code with your phone camera to join the temporary Wi-Fi hotspot.", 12, 0xffc5d4ea, false);
+            password.setPadding(0, dp(3), 0, 0);
+            details.addView(password);
+
+            TextView hint = text("Keep this screen open while your phone connects.", 11, 0xffc5d4ea, false);
             hint.setGravity(Gravity.CENTER);
-            hint.setPadding(0, dp(12), 0, 0);
-            content.addView(hint);
+            LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(-1, -2);
+            hintParams.topMargin = dp(13);
+            shell.addView(hint, hintParams);
+
             AlertDialog dialog = new AlertDialog.Builder(this)
-                    .setTitle("Connect to OLA Play Wi-Fi")
-                    .setView(content)
+                    .setView(shell)
                     .setPositiveButton("Done", null)
                     .setNeutralButton("Copy password", null)
                     .create();
-            dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
-                android.content.ClipboardManager clipboard =
-                        (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Wi-Fi password", hotspotPassword));
-                setStatus("Wi-Fi password copied to clipboard.");
-            }));
+            dialog.setOnShowListener(v -> {
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+                    dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND);
+                    android.view.WindowManager.LayoutParams lp = dialog.getWindow().getAttributes();
+                    lp.dimAmount = 0.58f;
+                    dialog.getWindow().setAttributes(lp);
+                }
+                dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(0xff8bdcff);
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setTextColor(0xff8bdcff);
+                dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
+                    android.content.ClipboardManager clipboard =
+                            (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Wi-Fi password", hotspotPassword));
+                    setStatus("Wi-Fi password copied to clipboard.");
+                });
+            });
             dialog.show();
         } catch (WriterException e) {
             setStatus("Could not generate the Wi-Fi QR code: " + e.getMessage());
