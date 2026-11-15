@@ -2,6 +2,7 @@ package org.androidauto.headunit;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
@@ -19,7 +20,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.util.Set;
+import java.util.ArrayList;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_PERMISSIONS = 40;
@@ -31,14 +32,29 @@ public final class MainActivity extends Activity {
     private WifiManager wifi;
     private WifiManager.LocalOnlyHotspotReservation hotspot;
     private boolean receiverRegistered;
+    private final ArrayList<BluetoothDevice> discoveredDevices = new ArrayList<>();
 
     private final BroadcastReceiver discoveryReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
-            if (BluetoothDevice.ACTION_FOUND.equals(intent.getAction())) {
+            String action = intent.getAction();
+            if (BluetoothDevice.ACTION_FOUND.equals(action)) {
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                 if (device != null) appendDevice(device);
-            } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(intent.getAction())) {
-                setStatus("Bluetooth discovery finished. This is device discovery only; Android Auto pairing is not implemented yet.");
+            } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
+                setStatus("Bluetooth discovery finished. Select your Vivo X300 and use Pair with selected phone.");
+            } else if (BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(action)) {
+                BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                int state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR);
+                if (device != null) {
+                    String name = device.getName() == null ? device.getAddress() : device.getName();
+                    if (state == BluetoothDevice.BOND_BONDED) {
+                        setStatus("Bluetooth pairing complete with " + name + ". Wireless Android Auto session is a separate next step.");
+                    } else if (state == BluetoothDevice.BOND_BONDING) {
+                        setStatus("Pairing with " + name + "… approve the pairing prompt on both devices.");
+                    } else if (state == BluetoothDevice.BOND_NONE) {
+                        setStatus("Pairing not completed or bond removed for " + name + ".");
+                    }
+                }
             }
         }
     };
@@ -85,6 +101,10 @@ public final class MainActivity extends Activity {
         scanBt.setOnClickListener(v -> scanBluetooth());
         root.addView(scanBt, buttonParams());
 
+        Button pairBt = button("Pair with selected phone");
+        pairBt.setOnClickListener(v -> chooseDeviceToPair());
+        root.addView(pairBt, buttonParams());
+
         Button startWifi = button("Start temporary Wi-Fi hotspot (band selected by Android)");
         startWifi.setOnClickListener(v -> startHotspot());
         root.addView(startWifi, buttonParams());
@@ -100,7 +120,7 @@ public final class MainActivity extends Activity {
         TextView footer = new TextView(this);
         footer.setTextColor(0xffffcc80);
         footer.setTextSize(12);
-        footer.setText("DEVELOPER PROTOTYPE — no Android Auto protocol session is implemented in this build.");
+        footer.setText("DEVELOPER PROTOTYPE — Bluetooth pairing diagnostics added; Android Auto projection protocol is not implemented.");
         root.addView(footer, new LinearLayout.LayoutParams(-1, -2));
         setContentView(root);
     }
@@ -134,10 +154,12 @@ public final class MainActivity extends Activity {
     private void registerDiscoveryReceiver() {
         IntentFilter f = new IntentFilter(BluetoothDevice.ACTION_FOUND);
         f.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+        f.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
         registerReceiver(discoveryReceiver, f);
         receiverRegistered = true;
     }
 
+    @SuppressWarnings("MissingPermission")
     private void scanBluetooth() {
         if (bluetooth == null) { setStatus("Bluetooth adapter unavailable."); return; }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -147,6 +169,7 @@ public final class MainActivity extends Activity {
         }
         if (!bluetooth.isEnabled()) { enableBluetooth(); return; }
         if (bluetooth.isDiscovering()) bluetooth.cancelDiscovery();
+        discoveredDevices.clear();
         devices.setText("Nearby Bluetooth devices:\n");
         boolean started = bluetooth.startDiscovery();
         setStatus(started ? "Scanning for nearby Bluetooth devices…" : "Could not start Bluetooth discovery.");
@@ -154,9 +177,50 @@ public final class MainActivity extends Activity {
 
     @SuppressWarnings("MissingPermission")
     private void appendDevice(BluetoothDevice device) {
-        String name = device.getName();
         String address = device.getAddress();
-        devices.append((name == null ? "Unknown device" : name) + "  •  " + address + "\n");
+        for (BluetoothDevice existing : discoveredDevices) {
+            if (existing.getAddress().equals(address)) return;
+        }
+        discoveredDevices.add(device);
+        String name = device.getName();
+        devices.append((name == null ? "Unknown device" : name) + "  •  " + address
+                + (device.getBondState() == BluetoothDevice.BOND_BONDED ? "  [PAIRED]" : "") + "\n");
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private void chooseDeviceToPair() {
+        if (bluetooth == null || !bluetooth.isEnabled()) {
+            enableBluetooth();
+            return;
+        }
+        if (discoveredDevices.isEmpty()) {
+            setStatus("Scan for nearby Bluetooth devices first, then select your Vivo X300.");
+            return;
+        }
+        String[] labels = new String[discoveredDevices.size()];
+        for (int i = 0; i < discoveredDevices.size(); i++) {
+            BluetoothDevice device = discoveredDevices.get(i);
+            String name = device.getName() == null ? "Unknown device" : device.getName();
+            labels[i] = name + "  •  " + device.getAddress()
+                    + (device.getBondState() == BluetoothDevice.BOND_BONDED ? "  [PAIRED]" : "");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Select your phone")
+                .setItems(labels, (dialog, which) -> pairDevice(discoveredDevices.get(which)))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    @SuppressWarnings("MissingPermission")
+    private void pairDevice(BluetoothDevice device) {
+        String name = device.getName() == null ? device.getAddress() : device.getName();
+        if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
+            setStatus(name + " is already paired. Wireless Android Auto protocol setup is not implemented yet.");
+            return;
+        }
+        boolean started = device.createBond();
+        setStatus(started ? "Pairing requested for " + name + ". Confirm the system pairing prompt on both devices."
+                : "Android could not start Bluetooth pairing with " + name + ".");
     }
 
     private void startHotspot() {
