@@ -493,6 +493,9 @@ public final class MainActivity extends Activity {
                 View exit = appRoot.findViewWithTag("projection-exit");
                 if (exit != null) exit.setVisibility(View.VISIBLE);
             });
+        } catch (UnsatisfiedLinkError error) {
+            runOnUiThread(() -> setStatus("Native ARM64 projection library is missing: " + error.getMessage()));
+            try { socket.close(); } catch (Exception ignored) { }
         } catch (Exception error) {
             runOnUiThread(() -> setStatus("Could not start native projection: " + error.getMessage()));
             try { socket.close(); } catch (Exception ignored) { }
