@@ -125,8 +125,8 @@ impl AndroidAutoVideoChannelTrait for AndroidHost {
         }
     }
     async fn setup_video(&self) -> Result<(), ()> {
-        let value = self.callback("onNativeVideoSetup", "()Z", &[]).ok_or(())?;
-        if value.z().unwrap_or(false) { Ok(()) } else { Err(()) }
+        let value = self.callback_bool("onNativeVideoSetup", "()Z", &[]).ok_or(())?;
+        if value { Ok(()) } else { Err(()) }
     }
     async fn teardown_video(&self) {
         self.callback_void("onNativeVideoTeardown", "()V", &[]);
@@ -243,10 +243,12 @@ pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeStar
     match result {
         Ok(id) => id as jlong,
         Err(error) => {
-            if let Ok(mut env) = env.get_java_vm().and_then(|vm| vm.attach_current_thread()) {
-                if let Ok(message) = env.new_string(error) {
-                    let object = JObject::from(message);
-                    let _ = env.call_method(activity, "onNativeStatus", "(Ljava/lang/String;)V", &[JValue::Object(&object)]);
+            if let Ok(vm) = env.get_java_vm() {
+                if let Ok(mut callback_env) = vm.attach_current_thread() {
+                    if let Ok(message) = callback_env.new_string(error) {
+                        let object = JObject::from(message);
+                        let _ = callback_env.call_method(&activity, "onNativeStatus", "(Ljava/lang/String;)V", &[JValue::Object(&object)]);
+                    }
                 }
             }
             0
@@ -289,7 +291,7 @@ pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeTouc
     touch.set_touch_action(touch_action);
     let mut event = Wifi::InputEventIndication::new();
     event.set_timestamp(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64);
-    event.set_touch_event(touch);
+    event.touch_event.0.replace(Box::new(touch));
     let _ = sender.try_send(AndroidAutoMessage::Input(event).sendable());
 }
 
