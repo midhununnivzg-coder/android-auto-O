@@ -85,7 +85,7 @@ public final class MainActivity extends Activity {
         scanBt.setOnClickListener(v -> scanBluetooth());
         root.addView(scanBt, buttonParams());
 
-        Button startWifi = button("Start temporary 5 GHz-capable Wi-Fi hotspot");
+        Button startWifi = button("Start temporary Wi-Fi hotspot (band selected by Android)");
         startWifi.setOnClickListener(v -> startHotspot());
         root.addView(startWifi, buttonParams());
 
@@ -174,7 +174,8 @@ public final class MainActivity extends Activity {
                     android.net.wifi.WifiConfiguration config = reservation.getWifiConfiguration();
                     String ssid = config != null ? config.SSID : "(SSID unavailable)";
                     String key = config != null ? config.preSharedKey : "(password unavailable)";
-                    setStatus("Android local-only hotspot started. SSID: " + ssid + "  Password: " + key
+                    String band = config != null && config.apBand == android.net.wifi.WifiConfiguration.AP_BAND_5GHZ ? "5 GHz" : "band selected by Android (5 GHz not confirmed)";
+                    setStatus("Android local-only hotspot started (" + band + "). SSID: " + ssid + "  Password: " + key
                             + "\nThis verifies hotspot capability only; Android Auto's Bluetooth-to-Wi-Fi handoff is not implemented.");
                 }
                 @Override public void onStopped() {
