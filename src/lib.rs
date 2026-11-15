@@ -2022,7 +2022,7 @@ pub struct AndroidAutoSetup {
 /// never accidentally skipped.
 pub fn setup() -> AndroidAutoSetup {
     let cp = rustls::crypto::ring::default_provider();
-    cp.install_default().expect("Failed to set ssl provider");
+    let _ = cp.install_default();
     AndroidAutoSetup { _private: () }
 }
 
@@ -2037,6 +2037,7 @@ pub async fn run_tcp_stream(
     config: AndroidAutoConfiguration,
     main: Box<dyn AndroidAutoMainTrait>,
 ) -> Result<(), ClientError> {
+    let _setup = setup();
     let _ = stream.set_nodelay(true);
     main.connect().await;
     let (reader, writer) = stream.into_split();
