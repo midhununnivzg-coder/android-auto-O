@@ -56,6 +56,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_ENABLE_BT = 41;
 
     private TextView status;
+    private TextView projectionStatus;
     private TextView devices;
     private TextView connectionPill;
     private BluetoothAdapter bluetooth;
@@ -258,6 +259,14 @@ public final class MainActivity extends Activity {
         });
         projectionSurface.setOnTouchListener((view, event) -> forwardTouch(event));
         appRoot.addView(projectionSurface, new FrameLayout.LayoutParams(-1, -1));
+        projectionStatus = text("Waiting for Android Auto video…", 13, Color.WHITE, true);
+        projectionStatus.setPadding(dp(14), dp(10), dp(14), dp(10));
+        projectionStatus.setBackground(glassDrawable(0xdd101b30, 0xff63b9ed, 15));
+        projectionStatus.setMaxLines(3);
+        projectionStatus.setVisibility(View.GONE);
+        FrameLayout.LayoutParams diagnosticParams = new FrameLayout.LayoutParams(-1, -2, Gravity.TOP | Gravity.LEFT);
+        diagnosticParams.setMargins(dp(12), dp(12), dp(78), 0);
+        appRoot.addView(projectionStatus, diagnosticParams);
         Button exitProjection = actionButton("×", "Return to OLA Play controls");
         FrameLayout.LayoutParams exitParams = new FrameLayout.LayoutParams(dp(54), dp(48), Gravity.TOP | Gravity.RIGHT);
         exitParams.setMargins(0, dp(10), dp(12), 0);
@@ -330,6 +339,9 @@ public final class MainActivity extends Activity {
 
     private void setStatus(String message) {
         if (status != null) status.setText(message);
+        if (projectionStatus != null && projectionStatus.getVisibility() == View.VISIBLE) {
+            projectionStatus.setText(message);
+        }
     }
 
     private void requestRuntimePermissions() {
@@ -508,6 +520,8 @@ public final class MainActivity extends Activity {
         runOnUiThread(() -> {
             homeScroll.setVisibility(View.GONE);
             projectionSurface.setVisibility(View.VISIBLE);
+            projectionStatus.setText("Android Auto requested video setup. Waiting for first decoded frame…");
+            projectionStatus.setVisibility(View.VISIBLE);
         });
         try {
             long deadline = System.currentTimeMillis() + 4000;
@@ -582,6 +596,7 @@ public final class MainActivity extends Activity {
         runOnUiThread(() -> {
             releaseVideoDecoder();
             projectionSurface.setVisibility(View.GONE);
+            projectionStatus.setVisibility(View.GONE);
             homeScroll.setVisibility(View.VISIBLE);
             if (connectionPill != null) connectionPill.setText("TRANSPORT OPEN");
         });
@@ -727,6 +742,7 @@ public final class MainActivity extends Activity {
         onNativeAudioInputStop();
         for (int i = 0; i < audioTracks.length; i++) onNativeAudioStop(i);
         projectionSurface.setVisibility(View.GONE);
+        projectionStatus.setVisibility(View.GONE);
         homeScroll.setVisibility(View.VISIBLE);
         if (connectionPill != null) connectionPill.setText("READY TO PAIR");
         setStatus("Projection session stopped.");
