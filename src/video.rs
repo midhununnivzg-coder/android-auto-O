@@ -108,10 +108,10 @@ impl ChannelHandlerTrait for VideoChannelHandler {
         if let Ok(msg2) = msg2 {
             match msg2 {
                 AvChannelMessage::AvChannelOpen(_chan, request) => {
+                    return Err(super::FrameIoError::SslSession(format!("Unexpected AV input-open request on video channel: {:?}", request)));
+                }
                 AvChannelMessage::AvChannelOpenResponse(_, response) => {
                     log::debug!("AV input-open response received: {:?}", response);
-                }
-                    return Err(super::FrameIoError::SslSession(format!("Unexpected AV input-open request on video channel: {:?}", request)));
                 }
                 AvChannelMessage::MediaIndicationAck(_, ack) => {
                     log::debug!("Video media acknowledgement received: {:?}", ack);
