@@ -73,6 +73,9 @@ impl ChannelHandlerTrait for SpeechAudioChannelHandler {
         if let Ok(msg2) = msg2 {
             match msg2 {
                 AvChannelMessage::AvChannelOpen(_chan, _m) => todo!(),
+                AvChannelMessage::AvChannelOpenResponse(_, response) => {
+                    log::debug!("AV input-open response received: {:?}", response);
+                }
                 AvChannelMessage::MediaIndicationAck(_, _) => unimplemented!(),
                 AvChannelMessage::MediaIndication(_chan, _timestamp, data) => {
                     main.receive_output_audio(crate::AudioChannelType::Speech, data)
