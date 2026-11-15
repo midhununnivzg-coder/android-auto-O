@@ -12,6 +12,7 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.Bitmap;
 import android.graphics.drawable.GradientDrawable;
 import android.net.wifi.WifiManager;
 import android.os.Build;
@@ -19,11 +20,20 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
+import java.util.Map;
+
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
+import com.google.zxing.WriterException;
+import com.google.zxing.qrcode.QRCodeWriter;
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel;
 
 public final class MainActivity extends Activity {
     private static final int REQUEST_PERMISSIONS = 40;
@@ -37,6 +47,8 @@ public final class MainActivity extends Activity {
     private WifiManager.LocalOnlyHotspotReservation hotspot;
     private AndroidAutoWirelessBridge wirelessBridge;
     private boolean receiverRegistered;
+    private String hotspotSsid;
+    private String hotspotPassword;
     private final ArrayList<BluetoothDevice> discoveredDevices = new ArrayList<>();
 
     private final BroadcastReceiver discoveryReceiver = new BroadcastReceiver() {
@@ -181,6 +193,10 @@ public final class MainActivity extends Activity {
         addHorizontalSpace(rowTwo, 10);
         rowTwo.addView(hotspotBt, weightedButton());
         page.addView(rowTwo, new LinearLayout.LayoutParams(-1, dp(62)));
+        addSpace(page, 9);
+        Button wifiQrButton = actionButton("▦   Show Wi-Fi QR / Password", "Display hotspot credentials as a QR code");
+        wifiQrButton.setOnClickListener(v -> showHotspotQr());
+        page.addView(wifiQrButton, new LinearLayout.LayoutParams(-1, dp(58)));
         addSpace(page, 18);
 
         LinearLayout deviceCard = glassCard();
@@ -392,14 +408,19 @@ public final class MainActivity extends Activity {
                     });
                     wirelessBridge.start(reservation);
                     android.net.wifi.WifiConfiguration config = reservation.getWifiConfiguration();
-                    String ssid = config != null ? config.SSID : "(SSID unavailable)";
-                    String key = config != null ? config.preSharedKey : "(password unavailable)";
+                    hotspotSsid = config != null ? config.SSID : null;
+                    hotspotPassword = config != null ? config.preSharedKey : null;
+                    String ssid = hotspotSsid != null ? hotspotSsid : "(SSID unavailable)";
+                    String key = hotspotPassword != null ? hotspotPassword : "(password unavailable)";
                     setStatus("Wi-Fi hotspot ready. SSID: " + ssid + "  Password: " + key
-                            + "\nAndroid selects the band. OLA Play is starting the Android Auto Bluetooth handoff.");
+                            + "\nTap “Show Wi-Fi QR / Password” to scan and connect. OLA Play is starting the Android Auto Bluetooth handoff.");
                     if (connectionPill != null) connectionPill.setText("WAITING FOR PHONE");
+                    if (hotspotSsid != null && hotspotPassword != null) showHotspotQr();
                 }
                 @Override public void onStopped() {
                     hotspot = null;
+                    hotspotSsid = null;
+                    hotspotPassword = null;
                     setStatus("Temporary Wi-Fi hotspot stopped by Android.");
                 }
                 @Override public void onFailed(int reason) {
@@ -410,6 +431,72 @@ public final class MainActivity extends Activity {
         } catch (SecurityException e) {
             setStatus("Hotspot permission denied: " + e.getMessage());
         }
+    }
+
+    private void showHotspotQr() {
+        if (hotspotSsid == null || hotspotPassword == null) {
+            setStatus("Start the temporary hotspot first. Android has not provided its Wi-Fi credentials yet.");
+            return;
+        }
+        try {
+            String wifiPayload = "WIFI:T:WPA;S:" + escapeWifiQr(hotspotSsid)
+                    + ";P:" + escapeWifiQr(hotspotPassword) + ";;";
+            Map<EncodeHintType, Object> hints = new EnumMap<>(EncodeHintType.class);
+            hints.put(EncodeHintType.ERROR_CORRECTION, ErrorCorrectionLevel.M);
+            hints.put(EncodeHintType.MARGIN, 2);
+            android.graphics.Bitmap qrBitmap;
+            com.google.zxing.common.BitMatrix matrix =
+                    new QRCodeWriter().encode(wifiPayload, BarcodeFormat.QR_CODE, 720, 720, hints);
+            qrBitmap = Bitmap.createBitmap(720, 720, Bitmap.Config.ARGB_8888);
+            for (int y = 0; y < 720; y++) {
+                for (int x = 0; x < 720; x++) {
+                    qrBitmap.setPixel(x, y, matrix.get(x, y) ? Color.BLACK : Color.WHITE);
+                }
+            }
+
+            LinearLayout content = new LinearLayout(this);
+            content.setOrientation(LinearLayout.VERTICAL);
+            content.setGravity(Gravity.CENTER_HORIZONTAL);
+            content.setPadding(dp(18), dp(8), dp(18), dp(8));
+            ImageView qr = new ImageView(this);
+            qr.setImageBitmap(qrBitmap);
+            qr.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            content.addView(qr, new LinearLayout.LayoutParams(dp(250), dp(250)));
+            TextView network = text("NETWORK  " + hotspotSsid, 14, Color.WHITE, true);
+            network.setGravity(Gravity.CENTER);
+            network.setPadding(0, dp(10), 0, dp(6));
+            content.addView(network);
+            TextView password = text("PASSWORD  " + hotspotPassword, 14, Color.WHITE, false);
+            password.setGravity(Gravity.CENTER);
+            password.setTextIsSelectable(true);
+            content.addView(password);
+            TextView hint = text("Scan this QR code with your phone camera to join the temporary Wi-Fi hotspot.", 12, 0xffc5d4ea, false);
+            hint.setGravity(Gravity.CENTER);
+            hint.setPadding(0, dp(12), 0, 0);
+            content.addView(hint);
+            AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setTitle("Connect to OLA Play Wi-Fi")
+                    .setView(content)
+                    .setPositiveButton("Done", null)
+                    .setNeutralButton("Copy password", null)
+                    .create();
+            dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(view -> {
+                android.content.ClipboardManager clipboard =
+                        (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Wi-Fi password", hotspotPassword));
+                setStatus("Wi-Fi password copied to clipboard.");
+            }));
+            dialog.show();
+        } catch (WriterException e) {
+            setStatus("Could not generate the Wi-Fi QR code: " + e.getMessage());
+        }
+    }
+
+    private String escapeWifiQr(String value) {
+        return value.replace("\\\\", "\\\\\\\\")
+                .replace(";", "\\\\;")
+                .replace(",", "\\\\,")
+                .replace(":", "\\\\:");
     }
 
     @Override protected void onDestroy() {
