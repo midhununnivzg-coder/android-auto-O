@@ -10,6 +10,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -28,6 +31,7 @@ public final class MainActivity extends Activity {
 
     private TextView status;
     private TextView devices;
+    private TextView connectionPill;
     private BluetoothAdapter bluetooth;
     private WifiManager wifi;
     private WifiManager.LocalOnlyHotspotReservation hotspot;
@@ -41,18 +45,20 @@ public final class MainActivity extends Activity {
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                 if (device != null) appendDevice(device);
             } else if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
-                setStatus("Bluetooth discovery finished. Select your Vivo X300 and use Pair with selected phone.");
+                setStatus("Scan complete. Select your phone from the device list and pair.");
             } else if (BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(action)) {
                 BluetoothDevice device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
                 int state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR);
                 if (device != null) {
                     String name = device.getName() == null ? device.getAddress() : device.getName();
                     if (state == BluetoothDevice.BOND_BONDED) {
-                        setStatus("Bluetooth pairing complete with " + name + ". Wireless Android Auto session is a separate next step.");
+                        setStatus("Paired with " + name + ". Android Auto session setup is the next development step.");
+                        if (connectionPill != null) connectionPill.setText("PHONE PAIRED");
                     } else if (state == BluetoothDevice.BOND_BONDING) {
-                        setStatus("Pairing with " + name + "… approve the pairing prompt on both devices.");
+                        setStatus("Pairing with " + name + "… approve the request on both devices.");
                     } else if (state == BluetoothDevice.BOND_NONE) {
                         setStatus("Pairing not completed or bond removed for " + name + ".");
+                        if (connectionPill != null) connectionPill.setText("NOT CONNECTED");
                     }
                 }
             }
@@ -63,8 +69,11 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        if (Build.VERSION.SDK_INT >= 21) {
+            getWindow().setNavigationBarColor(Color.rgb(8, 13, 28));
+            getWindow().setStatusBarColor(Color.rgb(8, 13, 28));
+        }
         bluetooth = BluetoothAdapter.getDefaultAdapter();
         wifi = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         buildUi();
@@ -73,71 +82,185 @@ public final class MainActivity extends Activity {
     }
 
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(32, 22, 32, 22);
-        root.setGravity(Gravity.CENTER_HORIZONTAL);
-        root.setBackgroundColor(0xff101820);
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setPadding(dp(26), dp(20), dp(26), dp(18));
+        page.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{Color.rgb(12, 20, 43), Color.rgb(18, 30, 55), Color.rgb(7, 13, 29)}));
 
-        TextView heading = new TextView(this);
-        heading.setText("ANDROID AUTO  •  HEAD UNIT");
-        heading.setTextColor(0xffffffff);
-        heading.setTextSize(25);
-        heading.setGravity(Gravity.CENTER);
-        root.addView(heading, new LinearLayout.LayoutParams(-1, 58));
-
-        status = new TextView(this);
-        status.setTextColor(0xffc6d5e0);
-        status.setTextSize(15);
-        status.setPadding(8, 12, 8, 18);
-        status.setText("Android 10 / ARM64 prototype. Checking device capabilities…");
-        root.addView(status, new LinearLayout.LayoutParams(-1, -2));
-
-        Button enableBt = button("Enable Bluetooth");
-        enableBt.setOnClickListener(v -> enableBluetooth());
-        root.addView(enableBt, buttonParams());
-
-        Button scanBt = button("Scan nearby Bluetooth devices");
-        scanBt.setOnClickListener(v -> scanBluetooth());
-        root.addView(scanBt, buttonParams());
-
-        Button pairBt = button("Pair with selected phone");
-        pairBt.setOnClickListener(v -> chooseDeviceToPair());
-        root.addView(pairBt, buttonParams());
-
-        Button startWifi = button("Start temporary Wi-Fi hotspot (band selected by Android)");
-        startWifi.setOnClickListener(v -> startHotspot());
-        root.addView(startWifi, buttonParams());
-
-        devices = new TextView(this);
-        devices.setTextColor(0xffffffff);
-        devices.setTextSize(14);
-        devices.setPadding(8, 16, 8, 8);
         ScrollView scroll = new ScrollView(this);
-        scroll.addView(devices);
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
+        scroll.setFillViewport(true);
+        scroll.setClipToPadding(false);
+        scroll.addView(page);
 
-        TextView footer = new TextView(this);
-        footer.setTextColor(0xffffcc80);
-        footer.setTextSize(12);
-        footer.setText("DEVELOPER PROTOTYPE — Bluetooth pairing diagnostics added; Android Auto projection protocol is not implemented.");
-        root.addView(footer, new LinearLayout.LayoutParams(-1, -2));
-        setContentView(root);
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+
+        TextView logo = new TextView(this);
+        logo.setText("◈");
+        logo.setTextColor(Color.rgb(130, 218, 255));
+        logo.setTextSize(27);
+        logo.setGravity(Gravity.CENTER);
+        logo.setBackground(glassDrawable(0x302e9dff, 0x8059caff, 22));
+        header.addView(logo, new LinearLayout.LayoutParams(dp(52), dp(52)));
+
+        LinearLayout titles = new LinearLayout(this);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.setPadding(dp(14), 0, 0, 0);
+        TextView heading = text("AURA  /  HEAD UNIT", 21, Color.WHITE, true);
+        TextView subheading = text("WIRELESS CONNECTIVITY", 10, 0xff9eafcf, true);
+        subheading.setLetterSpacing(0.16f);
+        titles.addView(heading);
+        titles.addView(subheading);
+        header.addView(titles, new LinearLayout.LayoutParams(0, -2, 1f));
+
+        TextView version = text("ANDROID 10  •  ARM64", 10, 0xffc4d8ee, true);
+        version.setGravity(Gravity.CENTER);
+        version.setPadding(dp(12), dp(10), dp(12), dp(10));
+        version.setBackground(glassDrawable(0x222c9bd2, 0x5548a9d5, 30));
+        header.addView(version);
+        page.addView(header, new LinearLayout.LayoutParams(-1, dp(60)));
+        addSpace(page, 18);
+
+        LinearLayout hero = glassCard();
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setPadding(dp(20), dp(17), dp(20), dp(18));
+
+        LinearLayout heroTop = new LinearLayout(this);
+        heroTop.setGravity(Gravity.CENTER_VERTICAL);
+        TextView eyebrow = text("CONNECTION STATUS", 11, 0xff9fb4d4, true);
+        eyebrow.setLetterSpacing(0.14f);
+        heroTop.addView(eyebrow, new LinearLayout.LayoutParams(0, -2, 1f));
+        connectionPill = text("READY TO PAIR", 10, 0xff8ee6c1, true);
+        connectionPill.setPadding(dp(11), dp(7), dp(11), dp(7));
+        connectionPill.setBackground(glassDrawable(0x2636d9a0, 0x6659dcb0, 30));
+        heroTop.addView(connectionPill);
+        hero.addView(heroTop);
+
+        status = text("Preparing Bluetooth and Wi-Fi services…", 15, 0xffe4edff, false);
+        status.setPadding(0, dp(13), 0, dp(2));
+        status.setLineSpacing(dp(3), 1f);
+        hero.addView(status);
+        page.addView(hero, new LinearLayout.LayoutParams(-1, -2));
+        addSpace(page, 18);
+
+        TextView actionsTitle = text("QUICK CONTROLS", 11, 0xff9fb4d4, true);
+        actionsTitle.setLetterSpacing(0.16f);
+        page.addView(actionsTitle);
+        addSpace(page, 9);
+
+        LinearLayout rowOne = new LinearLayout(this);
+        rowOne.setOrientation(LinearLayout.HORIZONTAL);
+        Button enableBt = actionButton("◉   Enable Bluetooth", "Turn on Bluetooth");
+        enableBt.setOnClickListener(v -> enableBluetooth());
+        Button scanBt = actionButton("⌕   Scan devices", "Find nearby phones");
+        scanBt.setOnClickListener(v -> scanBluetooth());
+        rowOne.addView(enableBt, weightedButton());
+        addHorizontalSpace(rowOne, 10);
+        rowOne.addView(scanBt, weightedButton());
+        page.addView(rowOne, new LinearLayout.LayoutParams(-1, dp(62)));
+
+        LinearLayout rowTwo = new LinearLayout(this);
+        rowTwo.setOrientation(LinearLayout.HORIZONTAL);
+        Button pairBt = actionButton("⇄   Pair phone", "Choose a discovered phone");
+        pairBt.setOnClickListener(v -> chooseDeviceToPair());
+        Button hotspotBt = actionButton("⌁   Start Wi-Fi", "Temporary local hotspot");
+        hotspotBt.setOnClickListener(v -> startHotspot());
+        rowTwo.addView(pairBt, weightedButton());
+        addHorizontalSpace(rowTwo, 10);
+        rowTwo.addView(hotspotBt, weightedButton());
+        page.addView(rowTwo, new LinearLayout.LayoutParams(-1, dp(62)));
+        addSpace(page, 18);
+
+        LinearLayout deviceCard = glassCard();
+        deviceCard.setOrientation(LinearLayout.VERTICAL);
+        deviceCard.setPadding(dp(18), dp(15), dp(18), dp(15));
+        LinearLayout deviceHeader = new LinearLayout(this);
+        deviceHeader.setGravity(Gravity.CENTER_VERTICAL);
+        TextView deviceTitle = text("NEARBY DEVICES", 11, 0xffb8cbe6, true);
+        deviceTitle.setLetterSpacing(0.14f);
+        deviceHeader.addView(deviceTitle, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView scanHint = text("BLUETOOTH", 9, 0xff80cfff, true);
+        deviceHeader.addView(scanHint);
+        deviceCard.addView(deviceHeader);
+        devices = text("No devices found yet.\nTap “Scan devices” to search nearby.", 13, 0xffdce8fb, false);
+        devices.setPadding(0, dp(14), 0, dp(4));
+        devices.setLineSpacing(dp(5), 1f);
+        deviceCard.addView(devices);
+        page.addView(deviceCard, new LinearLayout.LayoutParams(-1, -2));
+        addSpace(page, 13);
+
+        TextView note = text("AURA PROTOTYPE  •  Bluetooth pairing diagnostics are active. Full Android Auto projection is not implemented yet.", 10, 0xff8192b0, false);
+        note.setGravity(Gravity.CENTER);
+        note.setPadding(dp(8), dp(8), dp(8), dp(4));
+        page.addView(note, new LinearLayout.LayoutParams(-1, -2));
+        setContentView(scroll);
     }
 
-    private Button button(String label) {
+    private LinearLayout glassCard() {
+        LinearLayout card = new LinearLayout(this);
+        card.setBackground(glassDrawable(0x24ffffff, 0x55ffffff, 22));
+        if (Build.VERSION.SDK_INT >= 21) {
+            card.setElevation(dp(7));
+            card.setClipToOutline(true);
+        }
+        return card;
+    }
+
+    private GradientDrawable glassDrawable(int fill, int stroke, int radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(fill);
+        d.setCornerRadius(dp(radiusDp));
+        d.setStroke(dp(1), stroke);
+        return d;
+    }
+
+    private Button actionButton(String label, String description) {
         Button b = new Button(this);
         b.setText(label);
+        b.setTextSize(13);
+        b.setTextColor(0xffeaf5ff);
+        b.setAllCaps(false);
+        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(dp(8), 0, dp(8), 0);
+        b.setBackground(glassDrawable(0x332e5f91, 0x665da9dc, 17));
+        if (Build.VERSION.SDK_INT >= 21) b.setElevation(dp(3));
+        b.setContentDescription(description);
         return b;
     }
 
-    private LinearLayout.LayoutParams buttonParams() {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1, -2);
-        p.setMargins(0, 5, 0, 5);
-        return p;
+    private TextView text(String value, float size, int color, boolean bold) {
+        TextView t = new TextView(this);
+        t.setText(value);
+        t.setTextSize(size);
+        t.setTextColor(color);
+        t.setTypeface(Typeface.DEFAULT, bold ? Typeface.BOLD : Typeface.NORMAL);
+        return t;
     }
 
-    private void setStatus(String message) { status.setText(message); }
+    private LinearLayout.LayoutParams weightedButton() {
+        return new LinearLayout.LayoutParams(0, -1, 1f);
+    }
+
+    private void addSpace(LinearLayout parent, int heightDp) {
+        View space = new View(this);
+        parent.addView(space, new LinearLayout.LayoutParams(1, dp(heightDp)));
+    }
+
+    private void addHorizontalSpace(LinearLayout parent, int widthDp) {
+        View space = new View(this);
+        parent.addView(space, new LinearLayout.LayoutParams(dp(widthDp), 1));
+    }
+
+    private int dp(float value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
+    private void setStatus(String message) {
+        if (status != null) status.setText(message);
+    }
 
     private void requestRuntimePermissions() {
         if (Build.VERSION.SDK_INT >= 23) {
@@ -145,10 +268,11 @@ public final class MainActivity extends Activity {
         }
     }
 
+    @SuppressWarnings("MissingPermission")
     private void enableBluetooth() {
         if (bluetooth == null) { setStatus("This tablet does not expose a Bluetooth adapter."); return; }
         if (!bluetooth.isEnabled()) startActivityForResult(new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE), REQUEST_ENABLE_BT);
-        else setStatus("Bluetooth is enabled.");
+        else setStatus("Bluetooth is enabled and ready.");
     }
 
     private void registerDiscoveryReceiver() {
@@ -170,9 +294,10 @@ public final class MainActivity extends Activity {
         if (!bluetooth.isEnabled()) { enableBluetooth(); return; }
         if (bluetooth.isDiscovering()) bluetooth.cancelDiscovery();
         discoveredDevices.clear();
-        devices.setText("Nearby Bluetooth devices:\n");
+        devices.setText("Searching nearby…");
         boolean started = bluetooth.startDiscovery();
-        setStatus(started ? "Scanning for nearby Bluetooth devices…" : "Could not start Bluetooth discovery.");
+        setStatus(started ? "Searching for nearby Bluetooth devices…" : "Could not start Bluetooth discovery.");
+        if (connectionPill != null) connectionPill.setText("SCANNING");
     }
 
     @SuppressWarnings("MissingPermission")
@@ -183,8 +308,8 @@ public final class MainActivity extends Activity {
         }
         discoveredDevices.add(device);
         String name = device.getName();
-        devices.append((name == null ? "Unknown device" : name) + "  •  " + address
-                + (device.getBondState() == BluetoothDevice.BOND_BONDED ? "  [PAIRED]" : "") + "\n");
+        devices.append("\n" + (name == null ? "Unknown device" : name) + "   •   " + address
+                + (device.getBondState() == BluetoothDevice.BOND_BONDED ? "   ✓ PAIRED" : ""));
     }
 
     @SuppressWarnings("MissingPermission")
@@ -194,7 +319,7 @@ public final class MainActivity extends Activity {
             return;
         }
         if (discoveredDevices.isEmpty()) {
-            setStatus("Scan for nearby Bluetooth devices first, then select your Vivo X300.");
+            setStatus("Scan for nearby Bluetooth devices first, then select your phone.");
             return;
         }
         String[] labels = new String[discoveredDevices.size()];
@@ -215,7 +340,8 @@ public final class MainActivity extends Activity {
     private void pairDevice(BluetoothDevice device) {
         String name = device.getName() == null ? device.getAddress() : device.getName();
         if (device.getBondState() == BluetoothDevice.BOND_BONDED) {
-            setStatus(name + " is already paired. Wireless Android Auto protocol setup is not implemented yet.");
+            setStatus(name + " is already paired. Wireless Android Auto protocol setup is the next step.");
+            if (connectionPill != null) connectionPill.setText("PHONE PAIRED");
             return;
         }
         boolean started = device.createBond();
@@ -223,6 +349,7 @@ public final class MainActivity extends Activity {
                 : "Android could not start Bluetooth pairing with " + name + ".");
     }
 
+    @SuppressWarnings("MissingPermission")
     private void startHotspot() {
         if (wifi == null) { setStatus("Wi-Fi service unavailable."); return; }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -238,20 +365,18 @@ public final class MainActivity extends Activity {
                     android.net.wifi.WifiConfiguration config = reservation.getWifiConfiguration();
                     String ssid = config != null ? config.SSID : "(SSID unavailable)";
                     String key = config != null ? config.preSharedKey : "(password unavailable)";
-                    String band = "band selected by Android (frequency not exposed by this API)";
-                    setStatus("Android local-only hotspot started (" + band + "). SSID: " + ssid + "  Password: " + key
-                            + "\nThis verifies hotspot capability only; Android Auto's Bluetooth-to-Wi-Fi handoff is not implemented.");
+                    setStatus("Temporary Wi-Fi hotspot started. SSID: " + ssid + "  Password: " + key
+                            + "\nAndroid selects the band. This is a capability test, not Android Auto Wi-Fi handoff.");
                 }
                 @Override public void onStopped() {
                     hotspot = null;
                     setStatus("Temporary Wi-Fi hotspot stopped by Android.");
                 }
                 @Override public void onFailed(int reason) {
-                    setStatus("Android could not start the temporary hotspot. Error code: " + reason
-                            + ". Device firmware may restrict app-controlled hotspots.");
+                    setStatus("Android could not start the temporary hotspot. Error code: " + reason + ".");
                 }
             }, null);
-            setStatus("Requesting Android local-only hotspot…");
+            setStatus("Requesting temporary Wi-Fi hotspot…");
         } catch (SecurityException e) {
             setStatus("Hotspot permission denied: " + e.getMessage());
         }
