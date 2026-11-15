@@ -8,7 +8,7 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <application
         android:allowBackup="false"
-        android:label="Android Auto Head Unit"
+        android:label="OLA Play"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
         <activity
