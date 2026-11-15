@@ -16,6 +16,9 @@ pub enum AndroidAutoCommonMessage {
 impl TryFrom<&AndroidAutoFrame> for AndroidAutoCommonMessage {
     type Error = String;
     fn try_from(value: &AndroidAutoFrame) -> Result<Self, Self::Error> {
+        if value.data.len() < 2 {
+            return Err("Common channel frame is shorter than its 2-byte message type".to_string());
+        }
         let mut ty = [0u8; 2];
         ty.copy_from_slice(&value.data[0..2]);
         let ty = u16::from_be_bytes(ty);
@@ -23,7 +26,11 @@ impl TryFrom<&AndroidAutoFrame> for AndroidAutoCommonMessage {
             let w = Wifi::CommonMessage::from_i32(ty as i32);
             if let Some(m) = w {
                 match m {
-                    Wifi::CommonMessage::CHANNEL_OPEN_RESPONSE => unimplemented!(),
+                    Wifi::CommonMessage::CHANNEL_OPEN_RESPONSE => {
+                        let m = Wifi::ChannelOpenResponse::parse_from_bytes(&value.data[2..])
+                            .map_err(|e| format!("Invalid channel-open response: {e}"))?;
+                        Ok(AndroidAutoCommonMessage::ChannelOpenResponse(value.header.channel_id, m))
+                    }
                     Wifi::CommonMessage::CHANNEL_OPEN_REQUEST => {
                         let m = Wifi::ChannelOpenRequest::parse_from_bytes(&value.data[2..]);
                         match m {
@@ -63,7 +70,19 @@ impl From<AndroidAutoCommonMessage> for AndroidAutoFrame {
                     data: m,
                 }
             }
-            AndroidAutoCommonMessage::ChannelOpenRequest(_) => unimplemented!(),
+            AndroidAutoCommonMessage::ChannelOpenRequest(m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::CommonMessage::CHANNEL_OPEN_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame {
+                    header: FrameHeader {
+                        channel_id: 0,
+                        frame: FrameHeaderContents::new(true, FrameHeaderType::Single, true),
+                    },
+                    data: frame_data,
+                }
+            }
         }
     }
 }
