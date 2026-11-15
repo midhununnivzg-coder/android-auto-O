@@ -3,6 +3,9 @@
 #![deny(missing_docs)]
 #![deny(clippy::missing_docs_in_private_items)]
 
+#[cfg(feature = "android-jni")]
+mod android_jni;
+
 use std::{
     collections::HashSet,
     io::{Cursor, Read, Write},
@@ -13,8 +16,8 @@ mod cert;
 mod ssl;
 use ssl::*;
 
-#[cfg(not(any(feature = "wireless", feature = "usb")))]
-compile_error!("One of wireless or usb features must be enabled, both is also ok");
+#[cfg(not(any(feature = "wireless", feature = "usb", feature = "android-jni")))]
+compile_error!("One of wireless, usb, or android-jni features must be enabled");
 
 use ::protobuf::Message;
 use Wifi::ChannelDescriptor;
@@ -2016,4 +2019,20 @@ pub fn setup() -> AndroidAutoSetup {
     let cp = rustls::crypto::ring::default_provider();
     cp.install_default().expect("Failed to set ssl provider");
     AndroidAutoSetup { _private: () }
+}
+
+
+/// Run the Android Auto protocol engine on an already-established wireless TCP connection.
+///
+/// This entry point is intended for Android hosts which perform Bluetooth/Wi-Fi handoff
+/// themselves and pass the accepted TCP socket to the Rust protocol engine.
+#[cfg(feature = "android-jni")]
+pub async fn run_tcp_stream(
+    stream: tokio::net::TcpStream,
+    config: AndroidAutoConfiguration,
+    main: Box<dyn AndroidAutoMainTrait>,
+) -> Result<(), ClientError> {
+    let _ = stream.set_nodelay(true);
+    let (reader, writer) = stream.into_split();
+    handle_client_generic(reader, writer, config, &main).await
 }
