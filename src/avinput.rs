@@ -65,15 +65,24 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
         if let Ok(msg2) = msg2 {
             log::info!("Received: {channel} {:?}", msg2);
             match msg2 {
-                AvChannelMessage::AvChannelOpen(_chan, m) => {
-                    if m.open() {
-                        main.open_input_channel()
-                            .await
-                            .map_err(|_| FrameIoError::AudioInputOpenError)?;
+                AvChannelMessage::AvChannelOpen(_chan, request) => {
+                    let accepted = if request.open() {
+                        main.open_input_channel().await.is_ok()
                     } else {
-                        main.close_input_channel()
-                            .await
-                            .map_err(|_| FrameIoError::AudioInputCloseError)?;
+                        main.close_input_channel().await.is_ok()
+                    };
+                    let mut response = Wifi::AVInputOpenResponse::new();
+                    response.set_session(1);
+                    response.set_value(if accepted { 1 } else { 0 });
+                    stream.write_frame(
+                        AvChannelMessage::AvChannelOpenResponse(channel, response).into(),
+                    ).await?;
+                    if !accepted {
+                        return Err(if request.open() {
+                            FrameIoError::AudioInputOpenError
+                        } else {
+                            FrameIoError::AudioInputCloseError
+                        });
                     }
                 }
                 AvChannelMessage::AvChannelOpenResponse(_, response) => {
