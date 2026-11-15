@@ -431,7 +431,9 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                 AndroidAutoControlMessage::VoiceSession(m) => {
                     log::error!("Received voice session request {:?}", m);
                 }
-                AndroidAutoControlMessage::NavigationFocusResponse(_) => unimplemented!(),
+                AndroidAutoControlMessage::NavigationFocusResponse(m) => {
+                    log::info!("Navigation focus response received: {}", m.type_());
+                }
                 AndroidAutoControlMessage::NavigationFocusRequest(m) => {
                     log::error!("Received navigation focus request {}", m.type_());
                     let mut m2 = Wifi::NavigationFocusResponse::new();
@@ -440,7 +442,9 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                         .write_frame(AndroidAutoControlMessage::NavigationFocusResponse(m2).into())
                         .await?;
                 }
-                AndroidAutoControlMessage::ShutdownResponse => unimplemented!(),
+                AndroidAutoControlMessage::ShutdownResponse => {
+                    log::info!("Shutdown response received");
+                }
                 AndroidAutoControlMessage::ShutdownRequest(m) => {
                     if m.reason() == Wifi::shutdown_reason::Enum::QUIT {
                         stream
@@ -465,7 +469,9 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                         .write_frame(AndroidAutoControlMessage::PingResponse(m).into())
                         .await?;
                 }
-                AndroidAutoControlMessage::AudioFocusResponse(_) => unimplemented!(),
+                AndroidAutoControlMessage::AudioFocusResponse(m) => {
+                    log::info!("Audio focus response received: {:?}", m);
+                }
                 AndroidAutoControlMessage::AudioFocusRequest(m) => {
                     let mut m2 = Wifi::AudioFocusResponse::new();
                     let s = if m.has_audio_focus_type() {
@@ -494,7 +500,9 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                         .write_frame(AndroidAutoControlMessage::AudioFocusResponse(m2).into())
                         .await?;
                 }
-                AndroidAutoControlMessage::ServiceDiscoveryResponse(_) => unimplemented!(),
+                AndroidAutoControlMessage::ServiceDiscoveryResponse(m) => {
+                    log::info!("Phone service discovery response contains {} channels", m.channels.len());
+                }
                 AndroidAutoControlMessage::ServiceDiscoveryRequest(_m) => {
                     let mut m2 = Wifi::ServiceDiscoveryResponse::new();
                     m2.set_car_model(config.unit.car_model.clone());
@@ -520,11 +528,22 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                         .write_frame(AndroidAutoControlMessage::ServiceDiscoveryResponse(m2).into())
                         .await?;
                 }
-                AndroidAutoControlMessage::SslAuthComplete(_) => unimplemented!(),
+                AndroidAutoControlMessage::SslAuthComplete(ok) => {
+                    if !ok {
+                        return Err(super::FrameIoError::SslSession("Phone rejected TLS authentication".to_string()));
+                    }
+                    log::info!("Phone confirmed TLS authentication");
+                }
                 AndroidAutoControlMessage::SslHandshake(data) => {
                     stream.do_handshake(data).await?;
                 }
-                AndroidAutoControlMessage::VersionRequest => unimplemented!(),
+                AndroidAutoControlMessage::VersionRequest => {
+                    stream.write_frame(AndroidAutoControlMessage::VersionResponse {
+                        major: VERSION.0,
+                        minor: VERSION.1,
+                        status: 0,
+                    }.into()).await?;
+                }
                 AndroidAutoControlMessage::VersionResponse {
                     major,
                     minor,
@@ -539,7 +558,7 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                 }
             }
         } else {
-            todo!("{:?} {:x?}", msg2.err(), msg);
+            return Err(super::FrameIoError::SslSession(format!("Unrecognized control message: {:?}", msg2.err())));
         }
         Ok(())
     }
