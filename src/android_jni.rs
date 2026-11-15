@@ -149,6 +149,9 @@ impl AndroidAutoVideoChannelTrait for AndroidHost {
 impl AndroidAutoMainTrait for AndroidHost {
     async fn connect(&self) { self.status("Android Auto protocol session connected"); }
     async fn disconnect(&self) { self.status("Android Auto protocol session ended"); }
+    async fn protocol_error(&self, error: String) {
+        self.status(&format!("Android Auto session error: {error}"));
+    }
     async fn get_receiver(&self) -> Option<mpsc::Receiver<SendableAndroidAutoMessage>> {
         self.receiver.lock().ok()?.take()
     }
