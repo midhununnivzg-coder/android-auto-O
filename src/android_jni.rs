@@ -274,6 +274,7 @@ pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeTouc
         0 => Wifi::touch_action::Enum::PRESS,
         1 => Wifi::touch_action::Enum::RELEASE,
         2 => Wifi::touch_action::Enum::DRAG,
+        3 => Wifi::touch_action::Enum::RELEASE,
         5 => Wifi::touch_action::Enum::POINTER_DOWN,
         6 => Wifi::touch_action::Enum::POINTER_UP,
         _ => return,
