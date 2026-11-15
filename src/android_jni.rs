@@ -23,6 +23,11 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 
+
+fn audio_channel_id(t: AudioChannelType) -> jint {
+    match t { AudioChannelType::Media => 0, AudioChannelType::System => 1, AudioChannelType::Speech => 2 }
+}
+
 struct AndroidHost {
     vm: JavaVM,
     activity: GlobalRef,
@@ -91,16 +96,18 @@ impl AndroidAutoAudioOutputTrait for AndroidHost {
             }
         }
     }
-    async fn start_output_audio(&self, _t: AudioChannelType) {}
-    async fn stop_output_audio(&self, _t: AudioChannelType) {}
+    async fn start_output_audio(&self, t: AudioChannelType) { self.callback_void("onNativeAudioStart", "(I)V", &[JValue::Int(audio_channel_id(t))]); }
+    async fn stop_output_audio(&self, t: AudioChannelType) { self.callback_void("onNativeAudioStop", "(I)V", &[JValue::Int(audio_channel_id(t))]); }
 }
 
 #[async_trait::async_trait]
 impl AndroidAutoAudioInputTrait for AndroidHost {
-    async fn open_input_channel(&self) -> Result<(), ()> { Ok(()) }
-    async fn close_input_channel(&self) -> Result<(), ()> { Ok(()) }
-    async fn start_input_audio(&self) {}
-    async fn stop_input_audio(&self) {}
+    async fn open_input_channel(&self) -> Result<(), ()> {
+        if self.callback_bool("onNativeAudioInputOpen", "()Z", &[]).unwrap_or(false) { Ok(()) } else { Err(()) }
+    }
+    async fn close_input_channel(&self) -> Result<(), ()> { self.callback_void("onNativeAudioInputStop", "()V", &[]); Ok(()) }
+    async fn start_input_audio(&self) { self.callback_void("onNativeAudioInputStart", "()V", &[]); }
+    async fn stop_input_audio(&self) { self.callback_void("onNativeAudioInputStop", "()V", &[]); }
     async fn audio_input_ack(&self, _chan: u8, _ack: crate::Wifi::AVMediaAckIndication) {}
 }
 
@@ -293,6 +300,21 @@ pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeTouc
     event.set_timestamp(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64);
     event.touch_event.0.replace(Box::new(touch));
     let _ = sender.try_send(AndroidAutoMessage::Input(event).sendable());
+}
+
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeSendAudio(
+    env: JNIEnv, _class: JClass, handle: jlong, data: jni::objects::JByteArray, length: jint,
+) {
+    if length <= 0 || length > 65536 { return; }
+    let mut bytes = match env.convert_byte_array(&data) { Ok(value) => value, Err(_) => return };
+    if bytes.len() > length as usize { bytes.truncate(length as usize); }
+    let sender = handles().lock().ok().and_then(|map| map.get(&(handle as i64)).map(|h| h.input.clone()));
+    if let Some(sender) = sender {
+        let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64;
+        let _ = sender.try_send(AndroidAutoMessage::Audio(Some(timestamp), bytes).sendable());
+    }
 }
 
 #[unsafe(no_mangle)]
