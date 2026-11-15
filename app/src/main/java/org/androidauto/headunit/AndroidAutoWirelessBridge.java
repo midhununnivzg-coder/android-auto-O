@@ -149,12 +149,10 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
                 .string(7, "1")
                 .string(8, "0.2")
                 .toByteArray();
-        byte[] endpoint = new ProtoWriter().string(1, "0.0.0.0").varint(2, 5288).toByteArray();
         byte[] version = new ProtoWriter()
                 .varint(1, 4).varint(2, 2)
                 .varint(3, 2) // dual-band
                 .message(5, carInfo)
-                .message(6, endpoint)
                 .toByteArray();
         writePacket(output, MSG_WIFI_VERSION_REQUEST, version);
         status("WPP 4.2 version request sent. Waiting for phone response…");
