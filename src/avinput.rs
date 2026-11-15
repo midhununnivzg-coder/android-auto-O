@@ -66,6 +66,9 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
             log::info!("Received: {channel} {:?}", msg2);
             match msg2 {
                 AvChannelMessage::AvChannelOpen(_chan, m) => {
+                AvChannelMessage::AvChannelOpenResponse(_, response) => {
+                    log::debug!("AV input-open response received: {:?}", response);
+                }
                     if m.open() {
                         main.open_input_channel()
                             .await
