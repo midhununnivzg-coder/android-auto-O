@@ -1327,6 +1327,8 @@ enum AvChannelMessage {
     VideoFocusRequest(ChannelId, Wifi::VideoFocusRequest),
     /// Message requesting to open the channel
     AvChannelOpen(ChannelId, Wifi::AVInputOpenRequest),
+    /// The response to an audio input channel open request
+    AvChannelOpenResponse(ChannelId, Wifi::AVInputOpenResponse),
     /// Message indication the focus status of the video stream on the head unit
     VideoIndicationResponse(ChannelId, Wifi::VideoFocusIndication),
     /// The stream is about to start
@@ -1342,7 +1344,20 @@ enum AvChannelMessage {
 impl From<AvChannelMessage> for AndroidAutoFrame {
     fn from(value: AvChannelMessage) -> Self {
         match value {
-            AvChannelMessage::AvChannelOpen(_, _) => unimplemented!(),
+            AvChannelMessage::AvChannelOpen(chan, m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::avchannel_message::Enum::AV_INPUT_OPEN_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: chan, frame: FrameHeaderContents::new(true, FrameHeaderType::Single, false) }, data: frame_data }
+            }
+            AvChannelMessage::AvChannelOpenResponse(chan, m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::avchannel_message::Enum::AV_INPUT_OPEN_RESPONSE as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: chan, frame: FrameHeaderContents::new(true, FrameHeaderType::Single, false) }, data: frame_data }
+            }
             AvChannelMessage::MediaIndicationAck(chan, m) => {
                 let mut data = m.write_to_bytes().unwrap();
                 let t = Wifi::avchannel_message::Enum::AV_MEDIA_ACK_INDICATION as u16;
@@ -1359,7 +1374,13 @@ impl From<AvChannelMessage> for AndroidAutoFrame {
                     data: m,
                 }
             }
-            AvChannelMessage::SetupRequest(_, _) => unimplemented!(),
+            AvChannelMessage::SetupRequest(chan, m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::avchannel_message::Enum::SETUP_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: chan, frame: FrameHeaderContents::new(true, FrameHeaderType::Single, false) }, data: frame_data }
+            }
             AvChannelMessage::SetupResponse(chan, m) => {
                 let mut data = m.write_to_bytes().unwrap();
                 let t = Wifi::avchannel_message::Enum::SETUP_RESPONSE as u16;
@@ -1404,7 +1425,13 @@ impl From<AvChannelMessage> for AndroidAutoFrame {
                     data: m,
                 }
             }
-            AvChannelMessage::VideoFocusRequest(_chan, _m) => unimplemented!(),
+            AvChannelMessage::VideoFocusRequest(chan, m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::avchannel_message::Enum::VIDEO_FOCUS_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: chan, frame: FrameHeaderContents::new(true, FrameHeaderType::Single, false) }, data: frame_data }
+            }
             AvChannelMessage::VideoIndicationResponse(chan, m) => {
                 let mut data = m.write_to_bytes().unwrap();
                 let t = Wifi::avchannel_message::Enum::VIDEO_FOCUS_INDICATION as u16;
@@ -1421,8 +1448,20 @@ impl From<AvChannelMessage> for AndroidAutoFrame {
                     data: m,
                 }
             }
-            AvChannelMessage::StartIndication(_, _) => unimplemented!(),
-            AvChannelMessage::StopIndication(_, _) => unimplemented!(),
+            AvChannelMessage::StartIndication(chan, m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::avchannel_message::Enum::START_INDICATION as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: chan, frame: FrameHeaderContents::new(true, FrameHeaderType::Single, false) }, data: frame_data }
+            }
+            AvChannelMessage::StopIndication(chan, m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::avchannel_message::Enum::STOP_INDICATION as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: chan, frame: FrameHeaderContents::new(true, FrameHeaderType::Single, false) }, data: frame_data }
+            }
         }
     }
 }
@@ -1431,12 +1470,18 @@ impl TryFrom<&AndroidAutoFrame> for AvChannelMessage {
     type Error = String;
     fn try_from(value: &AndroidAutoFrame) -> Result<Self, Self::Error> {
         use protobuf::Enum;
+        if value.data.len() < 2 {
+            return Err("AV channel frame is shorter than its 2-byte message type".to_string());
+        }
         let mut ty = [0u8; 2];
         ty.copy_from_slice(&value.data[0..2]);
         let ty = u16::from_be_bytes(ty);
         if let Some(sys) = Wifi::avchannel_message::Enum::from_i32(ty as i32) {
             match sys {
                 Wifi::avchannel_message::Enum::AV_MEDIA_WITH_TIMESTAMP_INDICATION => {
+                    if value.data.len() < 10 {
+                        return Err("Timestamped AV media frame is shorter than 10 bytes".to_string());
+                    }
                     let mut b = [0u8; 8];
                     b.copy_from_slice(&value.data[2..10]);
                     let ts: u64 = u64::from_be_bytes(b);
@@ -1472,7 +1517,11 @@ impl TryFrom<&AndroidAutoFrame> for AvChannelMessage {
                         Err(e) => Err(format!("Invalid channel stop request: {}", e)),
                     }
                 }
-                Wifi::avchannel_message::Enum::SETUP_RESPONSE => unimplemented!(),
+                Wifi::avchannel_message::Enum::SETUP_RESPONSE => {
+                    let m = Wifi::AVChannelSetupResponse::parse_from_bytes(&value.data[2..])
+                        .map_err(|e| format!("Invalid AV setup response: {e}"))?;
+                    Ok(Self::SetupResponse(value.header.channel_id, m))
+                }
                 Wifi::avchannel_message::Enum::AV_MEDIA_ACK_INDICATION => {
                     let m = Wifi::AVMediaAckIndication::parse_from_bytes(&value.data[2..]);
                     match m {
@@ -1487,7 +1536,11 @@ impl TryFrom<&AndroidAutoFrame> for AvChannelMessage {
                         Err(e) => Err(format!("Invalid request: {}", e)),
                     }
                 }
-                Wifi::avchannel_message::Enum::AV_INPUT_OPEN_RESPONSE => todo!(),
+                Wifi::avchannel_message::Enum::AV_INPUT_OPEN_RESPONSE => {
+                    let m = Wifi::AVInputOpenResponse::parse_from_bytes(&value.data[2..])
+                        .map_err(|e| format!("Invalid AV input-open response: {e}"))?;
+                    Ok(Self::AvChannelOpenResponse(value.header.channel_id, m))
+                }
                 Wifi::avchannel_message::Enum::VIDEO_FOCUS_REQUEST => {
                     let m = Wifi::VideoFocusRequest::parse_from_bytes(&value.data[2..]);
                     match m {
@@ -1495,7 +1548,11 @@ impl TryFrom<&AndroidAutoFrame> for AvChannelMessage {
                         Err(e) => Err(format!("Invalid request: {}", e)),
                     }
                 }
-                Wifi::avchannel_message::Enum::VIDEO_FOCUS_INDICATION => unimplemented!(),
+                Wifi::avchannel_message::Enum::VIDEO_FOCUS_INDICATION => {
+                    let m = Wifi::VideoFocusIndication::parse_from_bytes(&value.data[2..])
+                        .map_err(|e| format!("Invalid video focus indication: {e}"))?;
+                    Ok(Self::VideoIndicationResponse(value.header.channel_id, m))
+                }
             }
         } else {
             Err(format!("Not converted message: {:x?}", value.data))
