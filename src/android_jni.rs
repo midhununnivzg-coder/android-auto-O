@@ -236,6 +236,7 @@ pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeStar
                     _ = stop_rx => {}
                 }
             });
+            if let Ok(mut map) = handles().lock() { map.remove(&id); }
         }).map_err(|e| e.to_string())?;
         Ok(id)
     })();
