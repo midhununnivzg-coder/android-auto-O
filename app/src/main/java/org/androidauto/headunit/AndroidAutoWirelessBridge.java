@@ -171,7 +171,7 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
                 long phoneStatus = ProtoReader.readVarintField(payload, 4);
                 Log.i(TAG, "WPP version response status=" + phoneStatus);
                 byte[] start = new ProtoWriter()
-                        .string(1, "0.0.0.0")
+                        .string(1, ip)
                         .varint(2, AA_TCP_PORT)
                         .varint(3, 0)
                         .toByteArray();
