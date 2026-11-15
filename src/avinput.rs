@@ -78,11 +78,7 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
                         AvChannelMessage::AvChannelOpenResponse(channel, response).into(),
                     ).await?;
                     if !accepted {
-                        return Err(if request.open() {
-                            FrameIoError::AudioInputOpenError
-                        } else {
-                            FrameIoError::AudioInputCloseError
-                        });
+                        log::warn!("Head unit declined the requested microphone channel; projection remains active");
                     }
                 }
                 AvChannelMessage::AvChannelOpenResponse(_, response) => {
