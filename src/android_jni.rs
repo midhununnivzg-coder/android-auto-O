@@ -148,7 +148,7 @@ impl AndroidAutoVideoChannelTrait for AndroidHost {
 #[async_trait::async_trait]
 impl AndroidAutoMainTrait for AndroidHost {
     async fn connect(&self) { self.status("Android Auto protocol session connected"); }
-    async fn disconnect(&self) { self.status("Android Auto protocol session ended"); }
+    // Keep the last diagnostic visible: run_tcp_stream reports protocol_error immediately\n    // before disconnect(), so a generic disconnect message here would overwrite the cause.\n    async fn disconnect(&self) { log::info!("Android Auto session disconnected"); }
     async fn protocol_error(&self, error: String) {
         self.status(&format!("Android Auto session error: {error}"));
     }
