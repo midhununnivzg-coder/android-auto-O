@@ -111,12 +111,15 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
                     projectionSocket = tcp;
                     status("Phone reached the Android Auto TCP transport. Encrypted projection session is the next layer.");
                     listener.onTcpConnected(tcp);
-                    // Keep the accepted socket alive for the projection-session layer.
-                    while (!closed && !tcp.isClosed() && !tcp.isInputShutdown()) {
-                        Thread.sleep(500);
+                    // Read and validate Android Auto's outer frame envelope. This is
+                    // deliberately a diagnostic stage: payloads remain encrypted and are
+                    // not modified until the TLS/session engine is integrated.
+                    try {
+                        inspectAndroidAutoFrames(tcp);
+                    } finally {
+                        try { tcp.close(); } catch (IOException ignored) {}
+                        projectionSocket = null;
                     }
-                    try { tcp.close(); } catch (IOException ignored) {}
-                    projectionSocket = null;
                 } catch (IOException e) {
                     if (!closed) {
                         Log.w(TAG, "Wireless client attempt ended", e);
@@ -131,6 +134,56 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
             }
         } finally {
             closeSockets();
+        }
+    }
+
+    /**
+     * Reads the Android Auto transport's two-byte frame header and length prefix.
+     * The frame payload is intentionally left opaque: encrypted frames must be
+     * passed, in arrival order, to the TLS engine before any channel parsing.
+     */
+    private void inspectAndroidAutoFrames(Socket socket) throws IOException {
+        DataInputStream input = new DataInputStream(socket.getInputStream());
+        int frameCount = 0;
+        while (!closed && !socket.isClosed()) {
+            int channel;
+            try {
+                channel = input.readUnsignedByte();
+            } catch (java.io.EOFException eof) {
+                status("Phone closed the Android Auto TCP transport.");
+                return;
+            }
+            int flags = input.readUnsignedByte();
+            int payloadLength = input.readUnsignedShort();
+            if (payloadLength > 0x4000) {
+                throw new IOException("Invalid Android Auto frame length: " + payloadLength);
+            }
+
+            int frameType = flags & 0x03;
+            boolean encrypted = (flags & 0x08) != 0;
+            boolean control = (flags & 0x04) != 0;
+            int totalMessageLength = -1;
+            if (frameType == 1) {
+                totalMessageLength = input.readInt();
+                if (totalMessageLength < payloadLength || totalMessageLength > 16 * 1024 * 1024) {
+                    throw new IOException("Invalid Android Auto fragmented-message length: "
+                            + totalMessageLength);
+                }
+            }
+
+            byte[] payload = new byte[payloadLength];
+            input.readFully(payload);
+            frameCount++;
+            Log.i(TAG, "AA frame RX #" + frameCount + ": channel=" + channel
+                    + ", type=" + frameType + ", control=" + control
+                    + ", encrypted=" + encrypted + ", bytes=" + payloadLength
+                    + (totalMessageLength >= 0 ? ", messageBytes=" + totalMessageLength : ""));
+            if (frameCount == 1) {
+                status("Android Auto session data received. First frame: channel " + channel
+                        + ", " + (control ? "control" : "data") + ", "
+                        + (encrypted ? "encrypted" : "unencrypted")
+                        + ". TLS/session processing is the next step.");
+            }
         }
     }
 
