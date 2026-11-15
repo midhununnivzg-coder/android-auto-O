@@ -100,7 +100,7 @@ impl AndroidAutoAudioInputTrait for AndroidHost {
     async fn close_input_channel(&self) -> Result<(), ()> { Ok(()) }
     async fn start_input_audio(&self) {}
     async fn stop_input_audio(&self) {}
-    async fn audio_input_ack(&self, _chan: u8, _ack: crate::AVMediaAckIndication) {}
+    async fn audio_input_ack(&self, _chan: u8, _ack: crate::Wifi::AVMediaAckIndication) {}
 }
 
 #[async_trait::async_trait]
@@ -192,7 +192,7 @@ pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeStar
         let std_stream = unsafe { std::net::TcpStream::from_raw_fd(duplicated) };
         std_stream.set_nonblocking(true).map_err(|e| e.to_string())?;
         let stream_vm = env.get_java_vm().map_err(|e| e.to_string())?;
-        let callback = env.new_global_ref(activity).map_err(|e| e.to_string())?;
+        let callback = env.new_global_ref(&activity).map_err(|e| e.to_string())?;
         let (input_tx, input_rx) = mpsc::channel(128);
         let (stop_tx, stop_rx) = oneshot::channel();
         let id = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
