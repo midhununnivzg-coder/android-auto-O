@@ -44,7 +44,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: android-auto-head-unit-android10-arm64-prototype
+          name: ola-play-android10-arm64-projection-candidate
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
