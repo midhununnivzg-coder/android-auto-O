@@ -602,7 +602,7 @@ public final class MainActivity extends Activity {
         }
         if (track != null) {
             try { track.write(data, 0, data.length, AudioTrack.WRITE_BLOCKING); }
-            catch (IllegalStateException error) { setStatus("Audio output stopped: " + error.getMessage()); }
+            catch (IllegalStateException error) { runOnUiThread(() -> setStatus("Audio output stopped: " + error.getMessage())); }
         }
     }
 
@@ -724,6 +724,8 @@ public final class MainActivity extends Activity {
         nativeSessionHandle = 0;
         if (handle != 0) NativeProjection.nativeStop(handle);
         releaseVideoDecoder();
+        onNativeAudioInputStop();
+        for (int i = 0; i < audioTracks.length; i++) onNativeAudioStop(i);
         projectionSurface.setVisibility(View.GONE);
         homeScroll.setVisibility(View.VISIBLE);
         if (connectionPill != null) connectionPill.setText("READY TO PAIR");
