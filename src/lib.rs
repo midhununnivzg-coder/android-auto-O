@@ -2033,6 +2033,9 @@ pub async fn run_tcp_stream(
     main: Box<dyn AndroidAutoMainTrait>,
 ) -> Result<(), ClientError> {
     let _ = stream.set_nodelay(true);
+    main.connect().await;
     let (reader, writer) = stream.into_split();
-    handle_client_generic(reader, writer, config, &main).await
+    let result = handle_client_generic(reader, writer, config, &main).await;
+    main.disconnect().await;
+    result
 }
