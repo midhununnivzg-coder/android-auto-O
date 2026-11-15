@@ -19,6 +19,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.media.MediaCodec;
+import android.media.AudioTrack;
+import android.media.AudioRecord;
+import android.media.AudioFormat;
+import android.media.AudioManager;
+import android.media.MediaRecorder;
 import android.media.MediaFormat;
 import android.view.Surface;
 import android.view.SurfaceHolder;
@@ -65,6 +70,10 @@ public final class MainActivity extends Activity {
     private SurfaceView projectionSurface;
     private MediaCodec videoDecoder;
     private volatile long nativeSessionHandle;
+    private final AudioTrack[] audioTracks = new AudioTrack[3];
+    private AudioRecord microphone;
+    private Thread microphoneThread;
+    private volatile boolean microphoneRunning;
     private final ArrayList<BluetoothDevice> discoveredDevices = new ArrayList<>();
 
     private final BroadcastReceiver discoveryReceiver = new BroadcastReceiver() {
@@ -325,7 +334,7 @@ public final class MainActivity extends Activity {
 
     private void requestRuntimePermissions() {
         if (Build.VERSION.SDK_INT >= 23) {
-            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_PERMISSIONS);
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.RECORD_AUDIO}, REQUEST_PERMISSIONS);
         }
     }
 
@@ -579,8 +588,95 @@ public final class MainActivity extends Activity {
         });
     }
 
-    public void onNativeAudio(int channel, byte[] data) {
-        // Audio codec negotiation is channel-specific; compressed packets must not be sent as PCM.
+    public synchronized void onNativeAudio(int channel, byte[] data) {
+        if (channel < 0 || channel >= audioTracks.length || data == null || data.length == 0) return;
+        AudioTrack track = audioTracks[channel];
+        if (track == null) {
+            onNativeAudioStart(channel);
+            track = audioTracks[channel];
+        }
+        if (track != null) {
+            try { track.write(data, 0, data.length, AudioTrack.WRITE_BLOCKING); }
+            catch (IllegalStateException error) { setStatus("Audio output stopped: " + error.getMessage()); }
+        }
+    }
+
+    public synchronized void onNativeAudioStart(int channel) {
+        if (channel < 0 || channel >= audioTracks.length || audioTracks[channel] != null) return;
+        int rate = channel == 0 ? 48000 : 16000;
+        int channels = channel == 0 ? AudioFormat.CHANNEL_OUT_STEREO : AudioFormat.CHANNEL_OUT_MONO;
+        int minimum = AudioTrack.getMinBufferSize(rate, channels, AudioFormat.ENCODING_PCM_16BIT);
+        if (minimum <= 0) return;
+        try {
+            AudioTrack track = new AudioTrack(AudioManager.STREAM_MUSIC, rate, channels,
+                    AudioFormat.ENCODING_PCM_16BIT, Math.max(minimum * 2, 4096),
+                    AudioTrack.MODE_STREAM);
+            track.play();
+            audioTracks[channel] = track;
+        } catch (Exception error) {
+            setStatus("Could not start audio output: " + error.getMessage());
+        }
+    }
+
+    public synchronized void onNativeAudioStop(int channel) {
+        if (channel < 0 || channel >= audioTracks.length) return;
+        AudioTrack track = audioTracks[channel];
+        audioTracks[channel] = null;
+        if (track != null) {
+            try { track.pause(); track.flush(); track.stop(); } catch (Exception ignored) { }
+            try { track.release(); } catch (Exception ignored) { }
+        }
+    }
+
+    public boolean onNativeAudioInputOpen() {
+        return checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public void onNativeAudioInputStart() {
+        if (microphoneRunning || nativeSessionHandle == 0 || !onNativeAudioInputOpen()) return;
+        int rate = 16000;
+        int minimum = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+        if (minimum <= 0) return;
+        try {
+            microphone = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
+                    AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+                    Math.max(minimum * 2, 4096));
+            microphone.startRecording();
+            microphoneRunning = true;
+            microphoneThread = new Thread(() -> {
+                byte[] buffer = new byte[3200];
+                while (microphoneRunning) {
+                    AudioRecord source = microphone;
+                    if (source == null) break;
+                    int read = source.read(buffer, 0, buffer.length);
+                    long handle = nativeSessionHandle;
+                    if (read > 0 && handle != 0) {
+                        byte[] packet = new byte[read];
+                        System.arraycopy(buffer, 0, packet, 0, read);
+                        NativeProjection.nativeSendAudio(handle, packet, read);
+                    }
+                }
+            }, "OLA-Microphone");
+            microphoneThread.setDaemon(true);
+            microphoneThread.start();
+        } catch (Exception error) {
+            microphoneRunning = false;
+            setStatus("Microphone could not start: " + error.getMessage());
+        }
+    }
+
+    public void onNativeAudioInputStop() {
+        microphoneRunning = false;
+        AudioRecord source = microphone;
+        microphone = null;
+        if (source != null) {
+            try { source.stop(); } catch (Exception ignored) { }
+            try { source.release(); } catch (Exception ignored) { }
+        }
+        Thread thread = microphoneThread;
+        microphoneThread = null;
+        if (thread != null) thread.interrupt();
     }
 
     public void onNativeStatus(String message) {
@@ -766,6 +862,8 @@ public final class MainActivity extends Activity {
         nativeSessionHandle = 0;
         if (handle != 0) NativeProjection.nativeStop(handle);
         releaseVideoDecoder();
+        onNativeAudioInputStop();
+        for (int i = 0; i < audioTracks.length; i++) onNativeAudioStop(i);
         if (bluetooth != null && bluetooth.isDiscovering()) bluetooth.cancelDiscovery();
         if (wirelessBridge != null) wirelessBridge.close();
         if (hotspot != null) hotspot.close();
