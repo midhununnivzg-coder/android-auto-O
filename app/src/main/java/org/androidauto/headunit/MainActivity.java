@@ -228,7 +228,7 @@ public final class MainActivity extends Activity {
     private Button actionButton(String label, String description) {
         Button b = new Button(this);
         b.setText(label);
-        b.setTextSize(13);
+        b.setTextSize(16);
         b.setTextColor(0xffeaf5ff);
         b.setAllCaps(false);
         b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
