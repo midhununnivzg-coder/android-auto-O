@@ -75,9 +75,15 @@ impl TryFrom<&AndroidAutoFrame> for InputMessage {
                         Err(e) => Err(format!("Invalid input bind request: {}", e)),
                     }
                 }
-                Wifi::input_channel_message::Enum::BINDING_RESPONSE => unimplemented!(),
-                Wifi::input_channel_message::Enum::INPUT_EVENT_INDICATION => todo!(),
-                Wifi::input_channel_message::Enum::NONE => todo!(),
+                Wifi::input_channel_message::Enum::BINDING_RESPONSE => {
+                    let m = Wifi::BindingResponse::parse_from_bytes(&value.data[2..]);
+                    match m { Ok(m) => Ok(Self::BindingResponse(value.header.channel_id, m)), Err(e) => Err(format!("Invalid input binding response: {e}")) }
+                }
+                Wifi::input_channel_message::Enum::INPUT_EVENT_INDICATION => {
+                    let m = Wifi::InputEventIndication::parse_from_bytes(&value.data[2..]);
+                    match m { Ok(m) => Ok(Self::InputEvent(value.header.channel_id, m)), Err(e) => Err(format!("Invalid input event: {e}")) }
+                }
+                Wifi::input_channel_message::Enum::NONE => Err("Received empty input-channel message".to_string()),
             }
         } else {
             Err(format!("Not converted message: {:x?}", value.data))
@@ -150,15 +156,21 @@ impl ChannelHandlerTrait for InputChannelHandler {
                         .write_frame(InputMessage::BindingResponse(chan, m2).into())
                         .await?;
                 }
-                InputMessage::BindingResponse(_, _) => unimplemented!(),
-                InputMessage::InputEvent(_, _) => unimplemented!(),
+                InputMessage::BindingResponse(_, response) => {
+                    log::debug!("Input binding response received: {:?}", response);
+                }
+                InputMessage::InputEvent(_, event) => {
+                    log::debug!("Input event received from phone: {:?}", event);
+                }
             }
             return Ok(());
         }
         let msg2: Result<AndroidAutoCommonMessage, String> = (&msg).try_into();
         if let Ok(msg2) = msg2 {
             match msg2 {
-                AndroidAutoCommonMessage::ChannelOpenResponse(_, _) => unimplemented!(),
+                AndroidAutoCommonMessage::ChannelOpenResponse(_, response) => {
+                    log::debug!("Channel-open response received: {:?}", response);
+                },
                 AndroidAutoCommonMessage::ChannelOpenRequest(_m) => {
                     let mut m2 = Wifi::ChannelOpenResponse::new();
                     m2.set_status(Wifi::status::Enum::OK);
