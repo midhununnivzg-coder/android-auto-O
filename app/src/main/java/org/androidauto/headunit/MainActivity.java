@@ -174,7 +174,7 @@ public final class MainActivity extends Activity {
                     android.net.wifi.WifiConfiguration config = reservation.getWifiConfiguration();
                     String ssid = config != null ? config.SSID : "(SSID unavailable)";
                     String key = config != null ? config.preSharedKey : "(password unavailable)";
-                    String band = config != null && config.apBand == android.net.wifi.WifiConfiguration.AP_BAND_5GHZ ? "5 GHz" : "band selected by Android (5 GHz not confirmed)";
+                    String band = "band selected by Android (frequency not exposed by this API)";
                     setStatus("Android local-only hotspot started (" + band + "). SSID: " + ssid + "  Password: " + key
                             + "\nThis verifies hotspot capability only; Android Auto's Bluetooth-to-Wi-Fi handoff is not implemented.");
                 }
