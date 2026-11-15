@@ -534,6 +534,9 @@ public final class MainActivity extends Activity {
                 }
             });
             return ready.await(5, TimeUnit.SECONDS) && ok[0];
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            return false;
         } catch (Exception error) {
             runOnUiThread(() -> {
                 setStatus("H.264 decoder setup failed: " + error.getMessage());
@@ -542,7 +545,6 @@ public final class MainActivity extends Activity {
             });
             return false;
         }
-        catch (InterruptedException error) { Thread.currentThread().interrupt(); return false; }
     }
 
     public void onNativeVideo(byte[] data, long timestampUs) {
