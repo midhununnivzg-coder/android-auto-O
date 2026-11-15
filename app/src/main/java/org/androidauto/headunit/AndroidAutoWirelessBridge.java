@@ -36,12 +36,17 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
     private static final String TAG = "OLAAutoBridge";
     private static final UUID ANDROID_AUTO_UUID =
             UUID.fromString("4de17a00-52cb-11e6-bdf4-0800200c9a66");
-    private static final UUID HFP_AG_UUID = UUID.fromString("0000111f-0000-1000-8000-00805f9b34fb");
-    private static final int AA_TCP_PORT = 5277;
+    private static final UUID HFP_HF_UUID = UUID.fromString("0000111e-0000-1000-8000-00805f9b34fb");
+    private static final int AA_TCP_PORT = 5288;
     private static final int MSG_WIFI_START_REQUEST = 1;
     private static final int MSG_WIFI_INFO_REQUEST = 2;
     private static final int MSG_WIFI_INFO_RESPONSE = 3;
     private static final int MSG_WIFI_START_RESPONSE = 7;
+    private static final int MSG_WIFI_VERSION_REQUEST = 4;
+    private static final int MSG_WIFI_VERSION_RESPONSE = 5;
+    private static final int MSG_WIFI_CONNECT_STATUS = 6;
+    private static final int MSG_WIFI_PING_REQUEST = 8;
+    private static final int MSG_WIFI_PING_RESPONSE = 9;
 
     interface Listener {
         void onStatus(String message);
@@ -89,11 +94,11 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
 
             tcpServer = new ServerSocket(AA_TCP_PORT, 1, InetAddress.getByName("0.0.0.0"));
             tcpServer.setSoTimeout(120000);
-            hfpServer = bluetooth.listenUsingRfcommWithServiceRecord("OLA Play Hands-Free", HFP_AG_UUID);
+            hfpServer = bluetooth.listenUsingRfcommWithServiceRecord("Hands-Free Unit", HFP_HF_UUID);
             startHfpAcceptLoop();
             bluetoothServer = bluetooth.listenUsingRfcommWithServiceRecord("Android Auto", ANDROID_AUTO_UUID);
             Log.i(TAG, "SDP RFCOMM listeners ready: HFP-AG=" + HFP_AG_UUID + ", Android Auto=" + ANDROID_AUTO_UUID);
-            status("Experimental HFP gateway and Android Auto Bluetooth services advertised. Waiting for phone…");
+            status("Hands-Free Unit and Android Auto Bluetooth services advertised. Waiting for phone…");
 
             while (!closed) {
                 try (BluetoothSocket bt = bluetoothServer.accept()) {
@@ -134,38 +139,71 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
         DataInputStream input = new DataInputStream(socket.getInputStream());
         DataOutputStream output = new DataOutputStream(socket.getOutputStream());
 
-        byte[] socketInfo = new ProtoWriter()
-                .string(1, ip)
-                .varint(2, AA_TCP_PORT)
+        // Modern WPP 4.2 opening: Type 4 -> Type 5 -> Type 1 -> Type 2 -> Type 3.
+        byte[] carInfo = new ProtoWriter()
+                .string(1, "Generic")
+                .string(2, "OLA Play")
+                .string(3, "2026")
+                .string(5, "OLA Play")
+                .string(6, "Wireless Head Unit")
+                .string(7, "1")
+                .string(8, "0.2")
                 .toByteArray();
-        writePacket(output, MSG_WIFI_START_REQUEST, socketInfo);
+        byte[] endpoint = new ProtoWriter().string(1, "0.0.0.0").varint(2, 5288).toByteArray();
+        byte[] version = new ProtoWriter()
+                .varint(1, 4).varint(2, 2)
+                .varint(3, 2) // dual-band
+                .message(5, carInfo)
+                .message(6, endpoint)
+                .toByteArray();
+        writePacket(output, MSG_WIFI_VERSION_REQUEST, version);
+        status("WPP 4.2 version request sent. Waiting for phone response…");
 
+        boolean startSent = false;
+        long deadline = System.currentTimeMillis() + 15000;
         while (!closed) {
             int length = input.readUnsignedShort();
             int messageId = input.readUnsignedShort();
-            if (length > 8192) throw new IOException("Oversized Bluetooth handoff packet");
+            if (length > 8192) throw new IOException("Oversized Bluetooth WPP packet");
             byte[] payload = new byte[length];
             input.readFully(payload);
+            Log.i(TAG, "WPP RX: type=" + messageId + ", bytes=" + length);
 
-            Log.i(TAG, "Android Auto packet received: id=" + messageId + ", bytes=" + length);
-            if (messageId == MSG_WIFI_INFO_REQUEST) {
-                Log.i(TAG, "Phone requested Wi-Fi credentials.");
-                byte[] networkInfo = new ProtoWriter()
+            if (messageId == MSG_WIFI_VERSION_RESPONSE && !startSent) {
+                long phoneStatus = ProtoReader.readVarintField(payload, 4);
+                Log.i(TAG, "WPP version response status=" + phoneStatus);
+                byte[] start = new ProtoWriter()
+                        .string(1, "0.0.0.0")
+                        .varint(2, AA_TCP_PORT)
+                        .varint(3, 0)
+                        .toByteArray();
+                writePacket(output, MSG_WIFI_START_REQUEST, start);
+                startSent = true;
+                status("Phone accepted WPP negotiation. Waiting for Wi-Fi credential request…");
+            } else if (messageId == MSG_WIFI_INFO_REQUEST) {
+                byte[] info = new ProtoWriter()
                         .string(1, ssid)
                         .string(2, password)
                         .string(3, mac)
-                        .varint(4, 8) // WPA2_PERSONAL
-                        .varint(5, 1) // DYNAMIC access point
+                        .varint(4, 8)
+                        .varint(5, 1)
                         .toByteArray();
-                writePacket(output, MSG_WIFI_INFO_RESPONSE, networkInfo);
+                writePacket(output, MSG_WIFI_INFO_RESPONSE, info);
+                status("Wi-Fi credentials sent. Waiting for phone to join and open TCP…");
             } else if (messageId == MSG_WIFI_START_RESPONSE) {
                 long statusCode = ProtoReader.readVarintField(payload, 3);
-                Log.i(TAG, "Wi-Fi handoff response status=" + statusCode);
-                if (statusCode != 0) throw new IOException("Phone rejected Wi-Fi handoff (status " + statusCode + ")");
+                Log.i(TAG, "WPP start response status=" + statusCode);
+                if (statusCode != 0) throw new IOException("Phone rejected WPP start (status " + statusCode + ")");
+            } else if (messageId == MSG_WIFI_CONNECT_STATUS) {
+                long statusCode = ProtoReader.readVarintField(payload, 1);
+                Log.i(TAG, "WPP connect status=" + statusCode);
+                if (statusCode != 0) throw new IOException("Phone could not join Wi-Fi (status " + statusCode + ")");
                 return;
-            } else if (messageId == MSG_WIFI_START_REQUEST) {
-                // Some phone builds repeat the socket request after reconnect.
-                return;
+            } else if (messageId == MSG_WIFI_PING_REQUEST) {
+                writePacket(output, MSG_WIFI_PING_RESPONSE, payload);
+            }
+            if (!startSent && System.currentTimeMillis() > deadline) {
+                throw new IOException("Timed out waiting for WPP version response");
             }
         }
         throw new IOException("Wireless handoff stopped");
@@ -175,22 +213,59 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
     private void startHfpAcceptLoop() {
         hfpThread = new Thread(() -> { while (!closed) { try {
             BluetoothSocket client = hfpServer.accept();
-            Log.i(TAG, "HFP-AG RFCOMM connected: " + client.getRemoteDevice().getAddress());
+            Log.i(TAG, "HFP-HF RFCOMM connected: " + client.getRemoteDevice().getAddress());
             status("Phone connected to HFP hands-free service. Negotiating Bluetooth link…");
             handleHfpClient(client);
-        } catch (IOException e) { if (!closed) { Log.w(TAG, "HFP-AG accept failed", e); status("HFP link ended: " + e.getMessage()); } } } }, "OLA-HFP-AG");
+        } catch (IOException e) { if (!closed) { Log.w(TAG, "HFP-HF accept failed", e); status("HFP link ended: " + e.getMessage()); } } } }, "OLA-HFP-HF");
         hfpThread.setDaemon(true); hfpThread.start();
     }
 
+    /** Implements the Hands-Free Unit side of HFP SLC. The phone is the Audio Gateway. */
     private void handleHfpClient(BluetoothSocket socket) {
-        try (BluetoothSocket client = socket; BufferedReader reader = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.US_ASCII)); PrintWriter writer = new PrintWriter(new OutputStreamWriter(client.getOutputStream(), StandardCharsets.US_ASCII), true)) {
-            String line; while (!closed && (line = reader.readLine()) != null) { String command = line.trim(); Log.i(TAG, "HFP AT <- " + command);
-                if (command.startsWith("AT+BRSF=")) writer.print("\r\n+BRSF: 0\r\nOK\r\n");
-                else if ("AT+CIND=?".equals(command)) writer.print("\r\n+CIND: (\"service\",(0,1)),(\"call\",(0,1)),(\"callsetup\",(0-3)),(\"callheld\",(0-2)),(\"signal\",(0-5)),(\"roam\",(0,1)),(\"battchg\",(0-5))\r\nOK\r\n");
-                else if ("AT+CIND?".equals(command)) writer.print("\r\n+CIND: 1,0,0,0,5,0,5\r\nOK\r\n");
-                else if (command.startsWith("AT+CMER=") || command.startsWith("AT+CHLD=") || command.startsWith("AT+BAC=") || command.startsWith("AT+CLIP=") || command.startsWith("AT+CCWA=") || command.startsWith("AT+VGS=") || command.startsWith("AT+VGM=") || command.startsWith("AT+NREC=") || "AT".equals(command)) { if ("AT+CHLD=?".equals(command)) writer.print("\r\n+CHLD: (0,1,2,3)\r\nOK\r\n"); else writer.print("\r\nOK\r\n"); }
-                else { Log.w(TAG, "Unsupported HFP AT command: " + command); writer.print("\r\nERROR\r\n"); } writer.flush(); }
+        try (BluetoothSocket client = socket) {
+            java.io.InputStream in = client.getInputStream();
+            java.io.OutputStream out = client.getOutputStream();
+            StringBuilder pending = new StringBuilder();
+            boolean brsf = false, cindTest = false, cindRead = false, cmer = false;
+            // The HF initiates SLC; waiting silently after accept leaves Android Auto asleep.
+            writeAt(out, "AT+BRSF=0\\r");
+            byte[] buf = new byte[512];
+            while (!closed) {
+                int n = in.read(buf);
+                if (n < 0) break;
+                pending.append(new String(buf, 0, n, StandardCharsets.US_ASCII));
+                int cut;
+                while ((cut = pending.indexOf("\\r")) >= 0 || (cut = pending.indexOf("\\n")) >= 0) {
+                    String line = pending.substring(0, cut).trim();
+                    pending.delete(0, cut + 1);
+                    if (line.isEmpty()) continue;
+                    Log.i(TAG, "HFP RX <- " + line);
+                    if (line.startsWith("+BRSF:")) {
+                        brsf = true;
+                    } else if ("OK".equalsIgnoreCase(line) || "ERROR".equalsIgnoreCase(line)) {
+                        if (!brsf) { brsf = true; writeAt(out, "AT+CIND=?\\r"); }
+                        else if (!cindTest) { cindTest = true; writeAt(out, "AT+CIND?\\r"); }
+                        else if (!cindRead) { cindRead = true; writeAt(out, "AT+CMER=3,0,0,1\\r"); }
+                        else if (!cmer) { cmer = true; status("Bluetooth hands-free service-level connection established. Waiting for Android Auto…"); }
+                    } else if (line.startsWith("AT+BRSF=")) {
+                        writeAt(out, "\\r\\n+BRSF: 0\\r\\nOK\\r\\n");
+                    } else if ("AT+CIND=?".equals(line)) {
+                        writeAt(out, "\\r\\n+CIND: (\\"service\\",(0,1)),(\\"call\\",(0,1)),(\\"callsetup\\",(0-3)),(\\"callheld\\",(0-2)),(\\"signal\\",(0-5)),(\\"roam\\",(0,1)),(\\"battchg\\",(0-5))\\r\\nOK\\r\\n");
+                    } else if ("AT+CIND?".equals(line)) {
+                        writeAt(out, "\\r\\n+CIND: 1,0,0,0,5,0,5\\r\\nOK\\r\\n");
+                    } else if (line.startsWith("AT+CMER=") || line.startsWith("AT+CHLD=") || line.startsWith("AT+BAC=") || line.startsWith("AT+CLIP=") || line.startsWith("AT+CCWA=") || line.startsWith("AT+VGS=") || line.startsWith("AT+VGM=") || line.startsWith("AT+NREC=") || "AT".equals(line)) {
+                        writeAt(out, "\\r\\nOK\\r\\n");
+                    } else {
+                        Log.w(TAG, "Unrecognised HFP line: " + line);
+                    }
+                }
+            }
         } catch (IOException e) { Log.i(TAG, "HFP client disconnected", e); }
+    }
+
+    private static void writeAt(java.io.OutputStream out, String value) throws IOException {
+        out.write(value.getBytes(StandardCharsets.US_ASCII));
+        out.flush();
     }
 
     private static void writePacket(DataOutputStream output, int messageId, byte[] payload)
@@ -277,7 +352,7 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
             return this;
         }
 
-        ProtoWriter varint(int field, long value) {
+        ProtoWriter message(int field, byte[] value) {\n            tag(field, 2);\n            rawVarint(value.length);\n            bytes.write(value, 0, value.length);\n            return this;\n        }\n\n        ProtoWriter varint(int field, long value) {
             tag(field, 0);
             rawVarint(value);
             return this;
