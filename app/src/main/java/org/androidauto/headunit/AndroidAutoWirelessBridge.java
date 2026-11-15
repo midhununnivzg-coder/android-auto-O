@@ -110,16 +110,16 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
                     tcp.setTcpNoDelay(true);
                     projectionSocket = tcp;
                     status("Phone reached the Android Auto TCP transport. Encrypted projection session is the next layer.");
+                    // Transfer ownership of the accepted TCP socket to the Rust TLS/session engine.
                     listener.onTcpConnected(tcp);
-                    // Read and validate Android Auto's outer frame envelope. This is
-                    // deliberately a diagnostic stage: payloads remain encrypted and are
-                    // not modified until the TLS/session engine is integrated.
-                    try {
-                        inspectAndroidAutoFrames(tcp);
-                    } finally {
-                        try { tcp.close(); } catch (IOException ignored) {}
-                        projectionSocket = null;
+                    while (!closed && !tcp.isClosed()) {
+                        try { Thread.sleep(250); }
+                        catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
                     }
+                    projectionSocket = null;
                 } catch (IOException e) {
                     if (!closed) {
                         Log.w(TAG, "Wireless client attempt ended", e);
