@@ -35,6 +35,7 @@ public final class MainActivity extends Activity {
     private BluetoothAdapter bluetooth;
     private WifiManager wifi;
     private WifiManager.LocalOnlyHotspotReservation hotspot;
+    private AndroidAutoWirelessBridge wirelessBridge;
     private boolean receiverRegistered;
     private final ArrayList<BluetoothDevice> discoveredDevices = new ArrayList<>();
 
@@ -174,7 +175,7 @@ public final class MainActivity extends Activity {
         rowTwo.setOrientation(LinearLayout.HORIZONTAL);
         Button pairBt = actionButton("⇄   Pair phone", "Choose a discovered phone");
         pairBt.setOnClickListener(v -> chooseDeviceToPair());
-        Button hotspotBt = actionButton("⌁   Start Wi-Fi", "Temporary local hotspot");
+        Button hotspotBt = actionButton("⌁   Start Android Auto", "Start hotspot and wireless handoff");
         hotspotBt.setOnClickListener(v -> startHotspot());
         rowTwo.addView(pairBt, weightedButton());
         addHorizontalSpace(rowTwo, 10);
@@ -200,7 +201,7 @@ public final class MainActivity extends Activity {
         page.addView(deviceCard, new LinearLayout.LayoutParams(-1, -2));
         addSpace(page, 13);
 
-        TextView note = text("AURA PROTOTYPE  •  Bluetooth pairing diagnostics are active. Full Android Auto projection is not implemented yet.", 10, 0xff8192b0, false);
+        TextView note = text("WIRELESS HANDOFF  •  Bluetooth-to-Wi-Fi setup is active. Encrypted projection and media channels are still being integrated.", 10, 0xff8192b0, false);
         note.setGravity(Gravity.CENTER);
         note.setPadding(dp(8), dp(8), dp(8), dp(4));
         page.addView(note, new LinearLayout.LayoutParams(-1, -2));
@@ -371,6 +372,25 @@ public final class MainActivity extends Activity {
             wifi.startLocalOnlyHotspot(new WifiManager.LocalOnlyHotspotCallback() {
                 @Override public void onStarted(WifiManager.LocalOnlyHotspotReservation reservation) {
                     hotspot = reservation;
+                    if (wirelessBridge != null) wirelessBridge.close();
+                    wirelessBridge = new AndroidAutoWirelessBridge(bluetooth, new AndroidAutoWirelessBridge.Listener() {
+                        @Override public void onStatus(String message) {
+                            runOnUiThread(() -> {
+                                setStatus(message);
+                                if (connectionPill != null) {
+                                    if (message.contains("TCP transport")) connectionPill.setText("PHONE CONNECTED");
+                                    else if (message.contains("advertised")) connectionPill.setText("WAITING FOR PHONE");
+                                    else if (message.contains("Bluetooth")) connectionPill.setText("HANDSHAKE");
+                                }
+                            });
+                        }
+                        @Override public void onTcpConnected(java.net.Socket socket) {
+                            runOnUiThread(() -> {
+                                if (connectionPill != null) connectionPill.setText("TRANSPORT OPEN");
+                            });
+                        }
+                    });
+                    wirelessBridge.start(reservation);
                     android.net.wifi.WifiConfiguration config = reservation.getWifiConfiguration();
                     String ssid = config != null ? config.SSID : "(SSID unavailable)";
                     String key = config != null ? config.preSharedKey : "(password unavailable)";
@@ -393,6 +413,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         if (bluetooth != null && bluetooth.isDiscovering()) bluetooth.cancelDiscovery();
+        if (wirelessBridge != null) wirelessBridge.close();
         if (hotspot != null) hotspot.close();
         if (receiverRegistered) unregisterReceiver(discoveryReceiver);
         super.onDestroy();
