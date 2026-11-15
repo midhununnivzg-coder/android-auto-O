@@ -17,6 +17,17 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
+import android.media.MediaCodec;
+import android.media.MediaFormat;
+import android.view.Surface;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+import android.view.MotionEvent;
+import android.widget.FrameLayout;
+import java.nio.ByteBuffer;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.Button;
@@ -49,6 +60,11 @@ public final class MainActivity extends Activity {
     private boolean receiverRegistered;
     private String hotspotSsid;
     private String hotspotPassword;
+    private FrameLayout appRoot;
+    private ScrollView homeScroll;
+    private SurfaceView projectionSurface;
+    private MediaCodec videoDecoder;
+    private volatile long nativeSessionHandle;
     private final ArrayList<BluetoothDevice> discoveredDevices = new ArrayList<>();
 
     private final BroadcastReceiver discoveryReceiver = new BroadcastReceiver() {
@@ -102,6 +118,7 @@ public final class MainActivity extends Activity {
                 new int[]{Color.rgb(12, 20, 43), Color.rgb(18, 30, 55), Color.rgb(7, 13, 29)}));
 
         ScrollView scroll = new ScrollView(this);
+        homeScroll = scroll;
         scroll.setFillViewport(true);
         scroll.setClipToPadding(false);
         scroll.addView(page);
@@ -217,11 +234,29 @@ public final class MainActivity extends Activity {
         page.addView(deviceCard, new LinearLayout.LayoutParams(-1, -2));
         addSpace(page, 13);
 
-        TextView note = text("WIRELESS HANDOFF  •  Bluetooth-to-Wi-Fi setup is active. Encrypted projection and media channels are still being integrated.", 10, 0xff8192b0, false);
+        TextView note = text("WIRELESS ANDROID AUTO  •  Projection and touchscreen start after phone authentication.", 10, 0xff8192b0, false);
         note.setGravity(Gravity.CENTER);
         note.setPadding(dp(8), dp(8), dp(8), dp(4));
         page.addView(note, new LinearLayout.LayoutParams(-1, -2));
-        setContentView(scroll);
+        appRoot = new FrameLayout(this);
+        appRoot.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
+        projectionSurface = new SurfaceView(this);
+        projectionSurface.setVisibility(View.GONE);
+        projectionSurface.getHolder().addCallback(new SurfaceHolder.Callback() {
+            @Override public void surfaceCreated(SurfaceHolder holder) { }
+            @Override public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) { }
+            @Override public void surfaceDestroyed(SurfaceHolder holder) { }
+        });
+        projectionSurface.setOnTouchListener((view, event) -> forwardTouch(event));
+        appRoot.addView(projectionSurface, new FrameLayout.LayoutParams(-1, -1));
+        Button exitProjection = actionButton("×", "Return to OLA Play controls");
+        FrameLayout.LayoutParams exitParams = new FrameLayout.LayoutParams(dp(54), dp(48), Gravity.TOP | Gravity.RIGHT);
+        exitParams.setMargins(0, dp(10), dp(12), 0);
+        exitProjection.setOnClickListener(v -> stopProjection());
+        exitProjection.setVisibility(View.GONE);
+        exitProjection.setTag("projection-exit");
+        appRoot.addView(exitProjection, exitParams);
+        setContentView(appRoot);
     }
 
     private LinearLayout glassCard() {
@@ -401,9 +436,7 @@ public final class MainActivity extends Activity {
                             });
                         }
                         @Override public void onTcpConnected(java.net.Socket socket) {
-                            runOnUiThread(() -> {
-                                if (connectionPill != null) connectionPill.setText("TRANSPORT OPEN");
-                            });
+                            startProjection(socket);
                         }
                     });
                     wirelessBridge.start(reservation);
@@ -431,6 +464,144 @@ public final class MainActivity extends Activity {
         } catch (SecurityException e) {
             setStatus("Hotspot permission denied: " + e.getMessage());
         }
+    }
+
+
+    private void startProjection(java.net.Socket socket) {
+        try {
+            ParcelFileDescriptor descriptor = ParcelFileDescriptor.fromSocket(socket);
+            long handle = NativeProjection.nativeStart(this, descriptor, 1280, 720);
+            descriptor.close();
+            nativeSessionHandle = handle;
+            if (handle == 0) {
+                setStatus("Native Android Auto engine could not start. Check the session log.");
+                return;
+            }
+            runOnUiThread(() -> {
+                if (connectionPill != null) connectionPill.setText("AUTHENTICATING");
+                setStatus("TCP transport handed to the native Android Auto TLS engine.");
+                View exit = findViewWithTag(appRoot, "projection-exit");
+                if (exit != null) exit.setVisibility(View.VISIBLE);
+            });
+        } catch (Exception error) {
+            runOnUiThread(() -> setStatus("Could not start native projection: " + error.getMessage()));
+            try { socket.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    public boolean onNativeVideoSetup() {
+        final CountDownLatch ready = new CountDownLatch(1);
+        final boolean[] ok = new boolean[1];
+        runOnUiThread(() -> {
+            try {
+                homeScroll.setVisibility(View.GONE);
+                projectionSurface.setVisibility(View.VISIBLE);
+                Surface surface = projectionSurface.getHolder().getSurface();
+                if (surface == null || !surface.isValid()) throw new IllegalStateException("Projection surface unavailable");
+                MediaFormat format = MediaFormat.createVideoFormat("video/avc", 1280, 720);
+                format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 2 * 1024 * 1024);
+                MediaCodec decoder = MediaCodec.createDecoderByType("video/avc");
+                decoder.configure(format, surface, null, 0);
+                decoder.start();
+                videoDecoder = decoder;
+                ok[0] = true;
+                if (connectionPill != null) connectionPill.setText("PROJECTION");
+            } catch (Exception error) {
+                setStatus("H.264 decoder setup failed: " + error.getMessage());
+                homeScroll.setVisibility(View.VISIBLE);
+                projectionSurface.setVisibility(View.GONE);
+            } finally {
+                ready.countDown();
+            }
+        });
+        try { return ready.await(5, TimeUnit.SECONDS) && ok[0]; }
+        catch (InterruptedException error) { Thread.currentThread().interrupt(); return false; }
+    }
+
+    public void onNativeVideo(byte[] data, long timestampUs) {
+        runOnUiThread(() -> {
+            MediaCodec decoder = videoDecoder;
+            if (decoder == null || data == null || data.length == 0) return;
+            try {
+                int inputIndex = decoder.dequeueInputBuffer(10000);
+                if (inputIndex >= 0) {
+                    ByteBuffer input = decoder.getInputBuffer(inputIndex);
+                    if (input != null && data.length <= input.capacity()) {
+                        input.clear();
+                        input.put(data);
+                        long pts = timestampUs > 0 ? timestampUs : System.nanoTime() / 1000L;
+                        decoder.queueInputBuffer(inputIndex, 0, data.length, pts, 0);
+                    } else {
+                        decoder.queueInputBuffer(inputIndex, 0, 0, 0, 0);
+                    }
+                }
+                MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+                int outputIndex;
+                while ((outputIndex = decoder.dequeueOutputBuffer(info, 0)) >= 0) {
+                    decoder.releaseOutputBuffer(outputIndex, true);
+                }
+            } catch (IllegalStateException error) {
+                setStatus("Video decoder stopped: " + error.getMessage());
+            }
+        });
+    }
+
+    public void onNativeVideoTeardown() {
+        runOnUiThread(() -> {
+            releaseVideoDecoder();
+            projectionSurface.setVisibility(View.GONE);
+            homeScroll.setVisibility(View.VISIBLE);
+            if (connectionPill != null) connectionPill.setText("TRANSPORT OPEN");
+        });
+    }
+
+    public void onNativeFocus(boolean focused) {
+        runOnUiThread(() -> {
+            if (connectionPill != null) connectionPill.setText(focused ? "PROJECTION" : "WAITING FOR FOCUS");
+        });
+    }
+
+    public void onNativeAudio(int channel, byte[] data) {
+        // Audio codec negotiation is channel-specific; compressed packets must not be sent as PCM.
+    }
+
+    public void onNativeStatus(String message) {
+        runOnUiThread(() -> {
+            setStatus(message);
+            if (connectionPill != null && message.toLowerCase().contains("tls")) {
+                connectionPill.setText("AUTHENTICATING");
+            }
+        });
+    }
+
+    private boolean forwardTouch(MotionEvent event) {
+        long handle = nativeSessionHandle;
+        if (handle == 0 || projectionSurface == null) return false;
+        int index = event.getActionIndex();
+        int x = Math.round(event.getX(index) * 1280f / Math.max(1, projectionSurface.getWidth()));
+        int y = Math.round(event.getY(index) * 720f / Math.max(1, projectionSurface.getHeight()));
+        NativeProjection.nativeTouch(handle, x, y, event.getActionMasked(), event.getPointerId(index));
+        return true;
+    }
+
+    private void releaseVideoDecoder() {
+        MediaCodec decoder = videoDecoder;
+        videoDecoder = null;
+        if (decoder != null) {
+            try { decoder.stop(); } catch (Exception ignored) { }
+            try { decoder.release(); } catch (Exception ignored) { }
+        }
+    }
+
+    private void stopProjection() {
+        long handle = nativeSessionHandle;
+        nativeSessionHandle = 0;
+        if (handle != 0) NativeProjection.nativeStop(handle);
+        releaseVideoDecoder();
+        projectionSurface.setVisibility(View.GONE);
+        homeScroll.setVisibility(View.VISIBLE);
+        if (connectionPill != null) connectionPill.setText("READY TO PAIR");
+        setStatus("Projection session stopped.");
     }
 
     private void showHotspotQr() {
