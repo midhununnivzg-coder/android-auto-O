@@ -480,7 +480,7 @@ public final class MainActivity extends Activity {
             runOnUiThread(() -> {
                 if (connectionPill != null) connectionPill.setText("AUTHENTICATING");
                 setStatus("TCP transport handed to the native Android Auto TLS engine.");
-                View exit = findViewWithTag(appRoot, "projection-exit");
+                View exit = appRoot.findViewWithTag("projection-exit");
                 if (exit != null) exit.setVisibility(View.VISIBLE);
             });
         } catch (Exception error) {
@@ -493,28 +493,45 @@ public final class MainActivity extends Activity {
         final CountDownLatch ready = new CountDownLatch(1);
         final boolean[] ok = new boolean[1];
         runOnUiThread(() -> {
-            try {
-                homeScroll.setVisibility(View.GONE);
-                projectionSurface.setVisibility(View.VISIBLE);
-                Surface surface = projectionSurface.getHolder().getSurface();
-                if (surface == null || !surface.isValid()) throw new IllegalStateException("Projection surface unavailable");
-                MediaFormat format = MediaFormat.createVideoFormat("video/avc", 1280, 720);
-                format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 2 * 1024 * 1024);
-                MediaCodec decoder = MediaCodec.createDecoderByType("video/avc");
-                decoder.configure(format, surface, null, 0);
-                decoder.start();
-                videoDecoder = decoder;
-                ok[0] = true;
-                if (connectionPill != null) connectionPill.setText("PROJECTION");
-            } catch (Exception error) {
+            homeScroll.setVisibility(View.GONE);
+            projectionSurface.setVisibility(View.VISIBLE);
+        });
+        try {
+            long deadline = System.currentTimeMillis() + 4000;
+            Surface surface = projectionSurface.getHolder().getSurface();
+            while ((surface == null || !surface.isValid()) && System.currentTimeMillis() < deadline) {
+                Thread.sleep(40);
+                surface = projectionSurface.getHolder().getSurface();
+            }
+            if (surface == null || !surface.isValid()) throw new IllegalStateException("Projection surface unavailable");
+            final Surface target = surface;
+            runOnUiThread(() -> {
+                try {
+                    MediaFormat format = MediaFormat.createVideoFormat("video/avc", 1280, 720);
+                    format.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 2 * 1024 * 1024);
+                    MediaCodec decoder = MediaCodec.createDecoderByType("video/avc");
+                    decoder.configure(format, target, null, 0);
+                    decoder.start();
+                    videoDecoder = decoder;
+                    ok[0] = true;
+                    if (connectionPill != null) connectionPill.setText("PROJECTION");
+                } catch (Exception error) {
+                    setStatus("H.264 decoder setup failed: " + error.getMessage());
+                    homeScroll.setVisibility(View.VISIBLE);
+                    projectionSurface.setVisibility(View.GONE);
+                } finally {
+                    ready.countDown();
+                }
+            });
+            return ready.await(5, TimeUnit.SECONDS) && ok[0];
+        } catch (Exception error) {
+            runOnUiThread(() -> {
                 setStatus("H.264 decoder setup failed: " + error.getMessage());
                 homeScroll.setVisibility(View.VISIBLE);
                 projectionSurface.setVisibility(View.GONE);
-            } finally {
-                ready.countDown();
-            }
-        });
-        try { return ready.await(5, TimeUnit.SECONDS) && ok[0]; }
+            });
+            return false;
+        }
         catch (InterruptedException error) { Thread.currentThread().interrupt(); return false; }
     }
 
