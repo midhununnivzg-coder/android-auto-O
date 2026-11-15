@@ -9,6 +9,7 @@ use crate::{
 use jni::{
     objects::{GlobalRef, JClass, JObject, JValue},
     sys::{jint, jlong},
+    objects::JIntArray,
     JNIEnv, JavaVM,
 };
 use std::{
@@ -254,25 +255,36 @@ pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeStar
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeTouch(
-    _env: JNIEnv, _class: JClass, handle: jlong, x: jint, y: jint, action: jint, pointer: jint,
+    mut env: JNIEnv, _class: JClass, handle: jlong,
+    xs: JIntArray, ys: JIntArray, ids: JIntArray, action: jint, action_index: jint,
 ) {
     let sender = handles().lock().ok().and_then(|map| map.get(&(handle as i64)).map(|h| h.input.clone()));
     let Some(sender) = sender else { return; };
     let touch_action = match action {
         0 => Wifi::touch_action::Enum::PRESS,
-        1 => Wifi::TouchAction::Enum::RELEASE,
-        2 => Wifi::TouchAction::Enum::DRAG,
-        5 => Wifi::TouchAction::Enum::POINTER_DOWN,
-        6 => Wifi::TouchAction::Enum::POINTER_UP,
+        1 => Wifi::touch_action::Enum::RELEASE,
+        2 => Wifi::touch_action::Enum::DRAG,
+        5 => Wifi::touch_action::Enum::POINTER_DOWN,
+        6 => Wifi::touch_action::Enum::POINTER_UP,
         _ => return,
     };
-    let mut location = Wifi::TouchLocation::new();
-    location.set_x(x.max(0) as u32);
-    location.set_y(y.max(0) as u32);
-    location.set_pointer_id(pointer.max(0) as u32);
+    let count = match env.get_array_length(&xs) { Ok(n) => n as usize, Err(_) => return };
+    if count == 0 || count > 10 { return; }
+    let mut x_values = vec![0; count];
+    let mut y_values = vec![0; count];
+    let mut id_values = vec![0; count];
+    if env.get_int_array_region(&xs, 0, &mut x_values).is_err()
+        || env.get_int_array_region(&ys, 0, &mut y_values).is_err()
+        || env.get_int_array_region(&ids, 0, &mut id_values).is_err() { return; }
     let mut touch = Wifi::TouchEvent::new();
-    touch.touch_location.push(location);
-    touch.set_action_index(0);
+    for i in 0..count {
+        let mut location = Wifi::TouchLocation::new();
+        location.set_x(x_values[i].max(0) as u32);
+        location.set_y(y_values[i].max(0) as u32);
+        location.set_pointer_id(id_values[i].max(0) as u32);
+        touch.touch_location.push(location);
+    }
+    touch.set_action_index(action_index.max(0) as u32);
     touch.set_touch_action(touch_action);
     let mut event = Wifi::InputEventIndication::new();
     event.set_timestamp(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_micros() as u64);
