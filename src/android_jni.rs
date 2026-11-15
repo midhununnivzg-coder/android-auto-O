@@ -33,13 +33,18 @@ struct AndroidHost {
 }
 
 impl AndroidHost {
-    fn callback(&self, name: &str, signature: &str, args: &[JValue]) -> Option<jni::objects::JValueOwned<'_>> {
+    fn callback_bool(&self, name: &str, signature: &str, args: &[JValue]) -> Option<bool> {
         let mut env = self.vm.attach_current_thread().ok()?;
         match env.call_method(self.activity.as_obj(), name, signature, args) {
-            Ok(value) => Some(value),
-            Err(error) => {
+            Ok(value) => value.z().ok(),
+            Err(error) => { log::error!("Java callback {name} failed: {error}"); None }
+        }
+    }
+
+    fn callback_void(&self, name: &str, signature: &str, args: &[JValue]) {
+        if let Ok(mut env) = self.vm.attach_current_thread() {
+            if let Err(error) = env.call_method(self.activity.as_obj(), name, signature, args) {
                 log::error!("Java callback {name} failed: {error}");
-                None
             }
         }
     }
@@ -95,7 +100,7 @@ impl AndroidAutoAudioInputTrait for AndroidHost {
     async fn close_input_channel(&self) -> Result<(), ()> { Ok(()) }
     async fn start_input_audio(&self) {}
     async fn stop_input_audio(&self) {}
-    async fn audio_input_ack(&self, _chan: u8, _ack: crate::protobufmod::Wifi::AVMediaAckIndication) {}
+    async fn audio_input_ack(&self, _chan: u8, _ack: crate::AVMediaAckIndication) {}
 }
 
 #[async_trait::async_trait]
@@ -123,11 +128,11 @@ impl AndroidAutoVideoChannelTrait for AndroidHost {
         if value.z().unwrap_or(false) { Ok(()) } else { Err(()) }
     }
     async fn teardown_video(&self) {
-        let _ = self.callback("onNativeVideoTeardown", "()V", &[]);
+        self.callback_void("onNativeVideoTeardown", "()V", &[]);
     }
     async fn wait_for_focus(&self) {}
     async fn set_focus(&self, focus: bool) {
-        let _ = self.callback("onNativeFocus", "(Z)V", &[JValue::Bool(focus.into())]);
+        self.callback_void("onNativeFocus", "(Z)V", &[JValue::Bool(focus as u8)]);
     }
     fn retrieve_video_configuration(&self) -> &VideoConfiguration { &self.video }
 }
@@ -254,7 +259,7 @@ pub extern "system" fn Java_org_androidauto_headunit_NativeProjection_nativeTouc
     let sender = handles().lock().ok().and_then(|map| map.get(&(handle as i64)).map(|h| h.input.clone()));
     let Some(sender) = sender else { return; };
     let touch_action = match action {
-        0 => Wifi::TouchAction::Enum::PRESS,
+        0 => Wifi::touch_action::Enum::PRESS,
         1 => Wifi::TouchAction::Enum::RELEASE,
         2 => Wifi::TouchAction::Enum::DRAG,
         5 => Wifi::TouchAction::Enum::POINTER_DOWN,
