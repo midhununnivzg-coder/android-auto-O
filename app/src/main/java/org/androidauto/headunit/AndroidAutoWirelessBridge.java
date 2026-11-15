@@ -224,8 +224,12 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
             java.io.InputStream in = client.getInputStream();
             java.io.OutputStream out = client.getOutputStream();
             StringBuilder pending = new StringBuilder();
-            boolean brsf = false, cindTest = false, cindRead = false, cmer = false;
-            // The HF initiates SLC; waiting silently after accept leaves Android Auto asleep.
+            boolean gotBrsf = false;
+            boolean gotCindTest = false;
+            boolean gotCindRead = false;
+            boolean gotCmer = false;
+
+            // The Hands-Free Unit initiates the HFP service-level connection.
             writeAt(out, "AT+BRSF=0\r");
             byte[] buf = new byte[512];
             while (!closed) {
@@ -233,32 +237,58 @@ final class AndroidAutoWirelessBridge implements AutoCloseable {
                 if (n < 0) break;
                 pending.append(new String(buf, 0, n, StandardCharsets.US_ASCII));
                 int cut;
-                while ((cut = pending.indexOf("\r")) >= 0 || (cut = pending.indexOf("\\n")) >= 0) {
+                while ((cut = nextAtLineEnd(pending)) >= 0) {
                     String line = pending.substring(0, cut).trim();
                     pending.delete(0, cut + 1);
                     if (line.isEmpty()) continue;
                     Log.i(TAG, "HFP RX <- " + line);
+
                     if (line.startsWith("+BRSF:")) {
-                        brsf = true;
-                    } else if ("OK".equalsIgnoreCase(line) || "ERROR".equalsIgnoreCase(line)) {
-                        if (!brsf) { brsf = true; writeAt(out, "AT+CIND=?\r"); }
-                        else if (!cindTest) { cindTest = true; writeAt(out, "AT+CIND?\r"); }
-                        else if (!cindRead) { cindRead = true; writeAt(out, "AT+CMER=3,0,0,1\r"); }
-                        else if (!cmer) { cmer = true; status("Bluetooth hands-free service-level connection established. Waiting for Android Auto…"); }
+                        gotBrsf = true;
+                    } else if ("OK".equalsIgnoreCase(line)) {
+                        if (!gotBrsf) {
+                            gotBrsf = true;
+                            writeAt(out, "AT+CIND=?\r");
+                        } else if (!gotCindTest) {
+                            gotCindTest = true;
+                            writeAt(out, "AT+CIND?\r");
+                        } else if (!gotCindRead) {
+                            gotCindRead = true;
+                            writeAt(out, "AT+CMER=3,0,0,1\r");
+                        } else if (!gotCmer) {
+                            gotCmer = true;
+                            status("Bluetooth hands-free service-level connection established. Waiting for Android Auto…");
+                        }
+                    } else if ("ERROR".equalsIgnoreCase(line)) {
+                        Log.w(TAG, "Phone rejected an HFP command");
                     } else if (line.startsWith("AT+BRSF=")) {
-                        writeAt(out, "\r\\n+BRSF: 0\r\\nOK\r\\n");
+                        writeAt(out, "\r\n+BRSF: 0\r\nOK\r\n");
                     } else if ("AT+CIND=?".equals(line)) {
-                        writeAt(out, "\r\\n+CIND: (\\"service\\",(0,1)),(\\"call\\",(0,1)),(\\"callsetup\\",(0-3)),(\\"callheld\\",(0-2)),(\\"signal\\",(0-5)),(\\"roam\\",(0,1)),(\\"battchg\\",(0-5))\r\\nOK\r\\n");
+                        writeAt(out, "\r\n+CIND: (\"service\",(0,1)),(\"call\",(0,1)),(\"callsetup\",(0-3)),(\"callheld\",(0-2)),(\"signal\",(0-5)),(\"roam\",(0,1)),(\"battchg\",(0-5))\r\nOK\r\n");
                     } else if ("AT+CIND?".equals(line)) {
-                        writeAt(out, "\r\\n+CIND: 1,0,0,0,5,0,5\r\\nOK\r\\n");
-                    } else if (line.startsWith("AT+CMER=") || line.startsWith("AT+CHLD=") || line.startsWith("AT+BAC=") || line.startsWith("AT+CLIP=") || line.startsWith("AT+CCWA=") || line.startsWith("AT+VGS=") || line.startsWith("AT+VGM=") || line.startsWith("AT+NREC=") || "AT".equals(line)) {
-                        writeAt(out, "\r\\nOK\r\\n");
+                        writeAt(out, "\r\n+CIND: 1,0,0,0,5,0,5\r\nOK\r\n");
+                    } else if (line.startsWith("AT+CMER=") || line.startsWith("AT+CHLD=")
+                            || line.startsWith("AT+BAC=") || line.startsWith("AT+CLIP=")
+                            || line.startsWith("AT+CCWA=") || line.startsWith("AT+VGS=")
+                            || line.startsWith("AT+VGM=") || line.startsWith("AT+NREC=")
+                            || "AT".equals(line)) {
+                        writeAt(out, "\r\nOK\r\n");
                     } else {
                         Log.w(TAG, "Unrecognised HFP line: " + line);
                     }
                 }
             }
-        } catch (IOException e) { Log.i(TAG, "HFP client disconnected", e); }
+        } catch (IOException e) {
+            Log.i(TAG, "HFP client disconnected", e);
+        }
+    }
+
+    private static int nextAtLineEnd(StringBuilder value) {
+        int cr = value.indexOf("\r");
+        int lf = value.indexOf("\n");
+        if (cr < 0) return lf;
+        if (lf < 0) return cr;
+        return Math.min(cr, lf);
     }
 
     private static void writeAt(java.io.OutputStream out, String value) throws IOException {
