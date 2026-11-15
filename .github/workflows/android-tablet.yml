@@ -40,7 +40,7 @@ jobs:
       - name: Install Protocol Buffers compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler
+          sudo apt-get install -y protobuf-compiler pkg-config libdbus-1-dev libudev-dev
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache Cargo dependencies
