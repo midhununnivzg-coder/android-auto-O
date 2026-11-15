@@ -82,7 +82,9 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
                 AvChannelMessage::MediaIndicationAck(chan, ack) => {
                     main.audio_input_ack(chan, ack).await;
                 }
-                AvChannelMessage::MediaIndication(_chan, _timestamp, _data) => unimplemented!(),
+                AvChannelMessage::MediaIndication(_chan, timestamp, data) => {
+                    log::debug!("Audio-input media packet received ({} bytes, timestamp {:?}); no phone-to-HU capture sink is configured", data.len(), timestamp);
+                }
                 AvChannelMessage::SetupRequest(_chan, _m) => {
                     let mut m2 = Wifi::AVChannelSetupResponse::new();
                     m2.set_max_unacked(10);
@@ -92,9 +94,15 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
                         .write_frame(AvChannelMessage::SetupResponse(channel, m2).into())
                         .await?;
                 }
-                AvChannelMessage::SetupResponse(_chan, _m) => unimplemented!(),
-                AvChannelMessage::VideoFocusRequest(_chan, _m) => unimplemented!(),
-                AvChannelMessage::VideoIndicationResponse(_, _) => unimplemented!(),
+                AvChannelMessage::SetupResponse(_chan, response) => {
+                    log::debug!("Audio-input setup response received: {:?}", response);
+                }
+                AvChannelMessage::VideoFocusRequest(_chan, request) => {
+                    log::debug!("Audio-input channel focus request received: {:?}", request);
+                }
+                AvChannelMessage::VideoIndicationResponse(_, response) => {
+                    log::debug!("Audio-input channel focus indication received: {:?}", response);
+                }
                 AvChannelMessage::StartIndication(_, _) => {
                     main.start_input_audio().await;
                 }
@@ -104,6 +112,6 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
             }
             return Ok(());
         }
-        todo!("{:x?}", msg);
+        Err(super::FrameIoError::SslSession(format!("Unrecognized audio-input channel message on channel {}: {:x?}", channel, msg.data)))
     }
 }
