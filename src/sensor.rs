@@ -21,7 +21,19 @@ pub enum SensorMessage {
 impl From<SensorMessage> for AndroidAutoFrame {
     fn from(value: SensorMessage) -> Self {
         match value {
-            SensorMessage::SensorStartRequest(_, _) => todo!(),
+            SensorMessage::SensorStartRequest(chan, m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::sensor_channel_message::Enum::SENSOR_START_REQUEST as u16).to_be_bytes();
+                let mut payload = vec![t[0], t[1]];
+                payload.append(&mut data);
+                AndroidAutoFrame {
+                    header: FrameHeader {
+                        channel_id: chan,
+                        frame: FrameHeaderContents::new(true, FrameHeaderType::Single, false),
+                    },
+                    data: payload,
+                }
+            },
             SensorMessage::SensorStartResponse(chan, m) => {
                 let mut data = m.write_to_bytes().unwrap();
                 let t = Wifi::sensor_channel_message::Enum::SENSOR_START_RESPONSE as u16;
@@ -62,6 +74,9 @@ impl TryFrom<&AndroidAutoFrame> for SensorMessage {
     type Error = String;
     fn try_from(value: &AndroidAutoFrame) -> Result<Self, Self::Error> {
         use protobuf::Enum;
+        if value.data.len() < 2 {
+            return Err("Sensor-channel frame is shorter than its 2-byte message type".to_string());
+        }
         let mut ty = [0u8; 2];
         ty.copy_from_slice(&value.data[0..2]);
         let ty = u16::from_be_bytes(ty);
@@ -74,9 +89,17 @@ impl TryFrom<&AndroidAutoFrame> for SensorMessage {
                         Err(e) => Err(e.to_string()),
                     }
                 }
-                Wifi::sensor_channel_message::Enum::SENSOR_START_RESPONSE => unimplemented!(),
-                Wifi::sensor_channel_message::Enum::SENSOR_EVENT_INDICATION => unimplemented!(),
-                Wifi::sensor_channel_message::Enum::NONE => unimplemented!(),
+                Wifi::sensor_channel_message::Enum::SENSOR_START_RESPONSE => {
+                    let m = Wifi::SensorStartResponseMessage::parse_from_bytes(&value.data[2..])
+                        .map_err(|e| format!("Invalid sensor-start response: {e}"))?;
+                    Ok(Self::SensorStartResponse(value.header.channel_id, m))
+                },
+                Wifi::sensor_channel_message::Enum::SENSOR_EVENT_INDICATION => {
+                    let m = Wifi::SensorEventIndication::parse_from_bytes(&value.data[2..])
+                        .map_err(|e| format!("Invalid sensor event: {e}"))?;
+                    Ok(Self::Event(value.header.channel_id, m))
+                },
+                Wifi::sensor_channel_message::Enum::NONE => Err("Received empty sensor-channel message".to_string()),
             }
         } else {
             Err(format!("Not converted message: {:x?}", value.data))
@@ -123,8 +146,8 @@ impl ChannelHandlerTrait for SensorChannelHandler {
         let msg2: Result<SensorMessage, String> = (&msg).try_into();
         if let Ok(msg2) = msg2 {
             match msg2 {
-                SensorMessage::Event(_chan, _m) => unimplemented!(),
-                SensorMessage::SensorStartResponse(_, _) => unimplemented!(),
+                SensorMessage::Event(_chan, m) => log::debug!("Sensor event from phone: {:?}", m),
+                SensorMessage::SensorStartResponse(_, response) => log::debug!("Sensor start response: {:?}", response),
                 SensorMessage::SensorStartRequest(_chan, m) => {
                     let mut m2 = Wifi::SensorStartResponseMessage::new();
 
@@ -158,6 +181,9 @@ impl ChannelHandlerTrait for SensorChannelHandler {
             }
             return Ok(());
         }
-        todo!("{:x?}", msg);
+        Err(super::FrameIoError::SslSession(format!(
+            "Unrecognized sensor-channel message on channel {}: {:x?}",
+            channel, msg.data
+        )))
     }
 }
