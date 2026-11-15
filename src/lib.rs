@@ -287,6 +287,11 @@ pub trait AndroidAutoMainTrait:
     /// The android auto device disconnected
     async fn disconnect(&self);
 
+    /// Report a protocol/session failure to the host UI. Default keeps it in logs.
+    async fn protocol_error(&self, error: String) {
+        log::error!("Android Auto protocol session error: {error}");
+    }
+
     /// Retrieve the receiver so that the user can send messages to the android auto compatible device or crate
     async fn get_receiver(&self)
     -> Option<tokio::sync::mpsc::Receiver<SendableAndroidAutoMessage>>;
@@ -2042,6 +2047,9 @@ pub async fn run_tcp_stream(
     main.connect().await;
     let (reader, writer) = stream.into_split();
     let result = handle_client_generic(reader, writer, config, &main).await;
+    if let Err(ref error) = result {
+        main.protocol_error(format!("{error:?}")).await;
+    }
     main.disconnect().await;
     result
 }
