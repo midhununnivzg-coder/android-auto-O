@@ -52,6 +52,9 @@ pub enum AndroidAutoControlMessage {
 impl TryFrom<&AndroidAutoFrame> for AndroidAutoControlMessage {
     type Error = String;
     fn try_from(value: &AndroidAutoFrame) -> Result<Self, Self::Error> {
+        if value.data.len() < 2 {
+            return Err("Control frame is shorter than its 2-byte message type".to_string());
+        }
         let mut ty = [0u8; 2];
         ty.copy_from_slice(&value.data[0..2]);
         let ty = u16::from_be_bytes(ty);
@@ -59,10 +62,20 @@ impl TryFrom<&AndroidAutoFrame> for AndroidAutoControlMessage {
             let w = Wifi::ControlMessage::from_i32(ty as i32);
             if let Some(m) = w {
                 match m {
-                    Wifi::ControlMessage::VERSION_REQUEST => unimplemented!(),
-                    Wifi::ControlMessage::AUTH_COMPLETE => unimplemented!(),
-                    Wifi::ControlMessage::MESSAGE_NONE => unimplemented!(),
-                    Wifi::ControlMessage::SERVICE_DISCOVERY_RESPONSE => unimplemented!(),
+                    Wifi::ControlMessage::VERSION_REQUEST => Ok(AndroidAutoControlMessage::VersionRequest),
+                    Wifi::ControlMessage::AUTH_COMPLETE => {
+                        let m = Wifi::AuthCompleteIndication::parse_from_bytes(&value.data[2..])
+                            .map_err(|e| format!("Invalid authentication-complete message: {e}"))?;
+                        Ok(AndroidAutoControlMessage::SslAuthComplete(
+                            m.status() == Wifi::AuthCompleteIndicationStatus::OK,
+                        ))
+                    }
+                    Wifi::ControlMessage::MESSAGE_NONE => Err("Received empty control message".to_string()),
+                    Wifi::ControlMessage::SERVICE_DISCOVERY_RESPONSE => {
+                        let m = Wifi::ServiceDiscoveryResponse::parse_from_bytes(&value.data[2..])
+                            .map_err(|e| format!("Invalid service discovery response: {e}"))?;
+                        Ok(AndroidAutoControlMessage::ServiceDiscoveryResponse(m))
+                    }
                     Wifi::ControlMessage::PING_REQUEST => {
                         let m = Wifi::PingRequest::parse_from_bytes(&value.data[2..]);
                         match m {
@@ -77,7 +90,11 @@ impl TryFrom<&AndroidAutoFrame> for AndroidAutoControlMessage {
                             Err(e) => Err(format!("Invalid request: {}", e)),
                         }
                     }
-                    Wifi::ControlMessage::NAVIGATION_FOCUS_RESPONSE => unimplemented!(),
+                    Wifi::ControlMessage::NAVIGATION_FOCUS_RESPONSE => {
+                        let m = Wifi::NavigationFocusResponse::parse_from_bytes(&value.data[2..])
+                            .map_err(|e| format!("Invalid navigation focus response: {e}"))?;
+                        Ok(AndroidAutoControlMessage::NavigationFocusResponse(m))
+                    }
                     Wifi::ControlMessage::SHUTDOWN_REQUEST => {
                         let m = Wifi::ShutdownRequest::parse_from_bytes(&value.data[2..]);
                         match m {
@@ -85,7 +102,7 @@ impl TryFrom<&AndroidAutoFrame> for AndroidAutoControlMessage {
                             Err(e) => Err(format!("Invalid shutdown request: {}", e)),
                         }
                     }
-                    Wifi::ControlMessage::SHUTDOWN_RESPONSE => unimplemented!(),
+                    Wifi::ControlMessage::SHUTDOWN_RESPONSE => Ok(AndroidAutoControlMessage::ShutdownResponse),
                     Wifi::ControlMessage::VOICE_SESSION_REQUEST => {
                         let m = Wifi::VoiceSessionRequest::parse_from_bytes(&value.data[2..]);
                         match m {
@@ -93,7 +110,11 @@ impl TryFrom<&AndroidAutoFrame> for AndroidAutoControlMessage {
                             Err(e) => Err(format!("Invalid ping response: {}", e)),
                         }
                     }
-                    Wifi::ControlMessage::AUDIO_FOCUS_RESPONSE => unimplemented!(),
+                    Wifi::ControlMessage::AUDIO_FOCUS_RESPONSE => {
+                        let m = Wifi::AudioFocusResponse::parse_from_bytes(&value.data[2..])
+                            .map_err(|e| format!("Invalid audio focus response: {e}"))?;
+                        Ok(AndroidAutoControlMessage::AudioFocusResponse(m))
+                    }
                     Wifi::ControlMessage::PING_RESPONSE => {
                         let m = Wifi::PingResponse::parse_from_bytes(&value.data[2..]);
                         match m {
@@ -148,8 +169,20 @@ impl TryFrom<&AndroidAutoFrame> for AndroidAutoControlMessage {
 impl From<AndroidAutoControlMessage> for AndroidAutoFrame {
     fn from(value: AndroidAutoControlMessage) -> Self {
         match value {
-            AndroidAutoControlMessage::VoiceSession(_) => unimplemented!(),
-            AndroidAutoControlMessage::NavigationFocusRequest(_) => unimplemented!(),
+            AndroidAutoControlMessage::VoiceSession(m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::ControlMessage::VOICE_SESSION_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: 0, frame: FrameHeaderContents::new(false, FrameHeaderType::Single, false) }, data: frame_data }
+            }
+            AndroidAutoControlMessage::NavigationFocusRequest(m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::ControlMessage::NAVIGATION_FOCUS_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: 0, frame: FrameHeaderContents::new(false, FrameHeaderType::Single, false) }, data: frame_data }
+            }
             AndroidAutoControlMessage::NavigationFocusResponse(m) => {
                 let mut data = m.write_to_bytes().unwrap();
                 let t = Wifi::ControlMessage::NAVIGATION_FOCUS_RESPONSE as u16;
@@ -166,7 +199,13 @@ impl From<AndroidAutoControlMessage> for AndroidAutoFrame {
                     data: m,
                 }
             }
-            AndroidAutoControlMessage::ShutdownRequest(_) => unimplemented!(),
+            AndroidAutoControlMessage::ShutdownRequest(m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::ControlMessage::SHUTDOWN_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: 0, frame: FrameHeaderContents::new(false, FrameHeaderType::Single, false) }, data: frame_data }
+            }
             AndroidAutoControlMessage::ShutdownResponse => {
                 let m = Wifi::ShutdownResponse::new();
                 let mut data = m.write_to_bytes().unwrap();
@@ -232,7 +271,13 @@ impl From<AndroidAutoControlMessage> for AndroidAutoFrame {
                     data: m,
                 }
             }
-            AndroidAutoControlMessage::AudioFocusRequest(_) => unimplemented!(),
+            AndroidAutoControlMessage::AudioFocusRequest(m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::ControlMessage::AUDIO_FOCUS_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: 0, frame: FrameHeaderContents::new(false, FrameHeaderType::Single, false) }, data: frame_data }
+            }
             AndroidAutoControlMessage::ServiceDiscoveryResponse(m) => {
                 let mut data = m.write_to_bytes().unwrap();
                 let t = Wifi::ControlMessage::SERVICE_DISCOVERY_RESPONSE as u16;
@@ -307,13 +352,22 @@ impl From<AndroidAutoControlMessage> for AndroidAutoFrame {
                     data: m,
                 }
             }
-            AndroidAutoControlMessage::ServiceDiscoveryRequest(_) => unimplemented!(),
-            AndroidAutoControlMessage::VersionResponse {
-                major: _,
-                minor: _,
-                status: _,
-            } => {
-                unimplemented!();
+            AndroidAutoControlMessage::ServiceDiscoveryRequest(m) => {
+                let mut data = m.write_to_bytes().unwrap_or_default();
+                let t = (Wifi::ControlMessage::SERVICE_DISCOVERY_REQUEST as u16).to_be_bytes();
+                let mut frame_data = vec![t[0], t[1]];
+                frame_data.append(&mut data);
+                AndroidAutoFrame { header: FrameHeader { channel_id: 0, frame: FrameHeaderContents::new(false, FrameHeaderType::Single, false) }, data: frame_data }
+            }
+            AndroidAutoControlMessage::VersionResponse { major, minor, status } => {
+                let t = (Wifi::ControlMessage::VERSION_RESPONSE as u16).to_be_bytes();
+                let major = major.to_be_bytes();
+                let minor = minor.to_be_bytes();
+                let status = status.to_be_bytes();
+                AndroidAutoFrame {
+                    header: FrameHeader { channel_id: 0, frame: FrameHeaderContents::new(false, FrameHeaderType::Single, false) },
+                    data: vec![t[0], t[1], major[0], major[1], minor[0], minor[1], status[0], status[1]],
+                }
             }
         }
     }
@@ -377,7 +431,9 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                 AndroidAutoControlMessage::VoiceSession(m) => {
                     log::error!("Received voice session request {:?}", m);
                 }
-                AndroidAutoControlMessage::NavigationFocusResponse(_) => unimplemented!(),
+                AndroidAutoControlMessage::NavigationFocusResponse(m) => {
+                    log::info!("Navigation focus response received: {}", m.type_());
+                }
                 AndroidAutoControlMessage::NavigationFocusRequest(m) => {
                     log::error!("Received navigation focus request {}", m.type_());
                     let mut m2 = Wifi::NavigationFocusResponse::new();
@@ -386,7 +442,9 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                         .write_frame(AndroidAutoControlMessage::NavigationFocusResponse(m2).into())
                         .await?;
                 }
-                AndroidAutoControlMessage::ShutdownResponse => unimplemented!(),
+                AndroidAutoControlMessage::ShutdownResponse => {
+                    log::info!("Shutdown response received");
+                }
                 AndroidAutoControlMessage::ShutdownRequest(m) => {
                     if m.reason() == Wifi::shutdown_reason::Enum::QUIT {
                         stream
@@ -411,7 +469,9 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                         .write_frame(AndroidAutoControlMessage::PingResponse(m).into())
                         .await?;
                 }
-                AndroidAutoControlMessage::AudioFocusResponse(_) => unimplemented!(),
+                AndroidAutoControlMessage::AudioFocusResponse(m) => {
+                    log::info!("Audio focus response received: {:?}", m);
+                }
                 AndroidAutoControlMessage::AudioFocusRequest(m) => {
                     let mut m2 = Wifi::AudioFocusResponse::new();
                     let s = if m.has_audio_focus_type() {
@@ -440,7 +500,9 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                         .write_frame(AndroidAutoControlMessage::AudioFocusResponse(m2).into())
                         .await?;
                 }
-                AndroidAutoControlMessage::ServiceDiscoveryResponse(_) => unimplemented!(),
+                AndroidAutoControlMessage::ServiceDiscoveryResponse(m) => {
+                    log::info!("Phone service discovery response contains {} channels", m.channels.len());
+                }
                 AndroidAutoControlMessage::ServiceDiscoveryRequest(_m) => {
                     let mut m2 = Wifi::ServiceDiscoveryResponse::new();
                     m2.set_car_model(config.unit.car_model.clone());
@@ -466,11 +528,22 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                         .write_frame(AndroidAutoControlMessage::ServiceDiscoveryResponse(m2).into())
                         .await?;
                 }
-                AndroidAutoControlMessage::SslAuthComplete(_) => unimplemented!(),
+                AndroidAutoControlMessage::SslAuthComplete(ok) => {
+                    if !ok {
+                        return Err(super::FrameIoError::SslSession("Phone rejected TLS authentication".to_string()));
+                    }
+                    log::info!("Phone confirmed TLS authentication");
+                }
                 AndroidAutoControlMessage::SslHandshake(data) => {
                     stream.do_handshake(data).await?;
                 }
-                AndroidAutoControlMessage::VersionRequest => unimplemented!(),
+                AndroidAutoControlMessage::VersionRequest => {
+                    stream.write_frame(AndroidAutoControlMessage::VersionResponse {
+                        major: VERSION.0,
+                        minor: VERSION.1,
+                        status: 0,
+                    }.into()).await?;
+                }
                 AndroidAutoControlMessage::VersionResponse {
                     major,
                     minor,
@@ -485,7 +558,7 @@ impl ChannelHandlerTrait for ControlChannelHandler {
                 }
             }
         } else {
-            todo!("{:?} {:x?}", msg2.err(), msg);
+            return Err(super::FrameIoError::SslSession(format!("Unrecognized control message: {:?}", msg2.err())));
         }
         Ok(())
     }

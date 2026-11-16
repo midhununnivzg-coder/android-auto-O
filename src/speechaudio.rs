@@ -46,7 +46,9 @@ impl ChannelHandlerTrait for SpeechAudioChannelHandler {
         let msg2: Result<AndroidAutoCommonMessage, String> = (&msg).try_into();
         if let Ok(msg2) = msg2 {
             match msg2 {
-                AndroidAutoCommonMessage::ChannelOpenResponse(_, _) => unimplemented!(),
+                AndroidAutoCommonMessage::ChannelOpenResponse(_, response) => {
+                    log::debug!("Channel-open response received: {:?}", response);
+                },
                 AndroidAutoCommonMessage::ChannelOpenRequest(_m) => {
                     let mut m2 = Wifi::ChannelOpenResponse::new();
                     let status = main
@@ -70,8 +72,15 @@ impl ChannelHandlerTrait for SpeechAudioChannelHandler {
         let msg2: Result<AvChannelMessage, String> = (&msg).try_into();
         if let Ok(msg2) = msg2 {
             match msg2 {
-                AvChannelMessage::AvChannelOpen(_chan, _m) => todo!(),
-                AvChannelMessage::MediaIndicationAck(_, _) => unimplemented!(),
+                AvChannelMessage::AvChannelOpen(_chan, request) => {
+                    return Err(super::FrameIoError::SslSession(format!("Unexpected AV input-open request on speech-audio output channel: {:?}", request)));
+                }
+                AvChannelMessage::AvChannelOpenResponse(_, response) => {
+                    log::debug!("AV input-open response received: {:?}", response);
+                }
+                AvChannelMessage::MediaIndicationAck(_, ack) => {
+                    log::debug!("Speech audio acknowledgement received: {:?}", ack);
+                }
                 AvChannelMessage::MediaIndication(_chan, _timestamp, data) => {
                     main.receive_output_audio(crate::AudioChannelType::Speech, data)
                         .await
@@ -85,7 +94,9 @@ impl ChannelHandlerTrait for SpeechAudioChannelHandler {
                         .write_frame(AvChannelMessage::SetupResponse(channel, m2).into())
                         .await?;
                 }
-                AvChannelMessage::SetupResponse(_chan, _m) => unimplemented!(),
+                AvChannelMessage::SetupResponse(_chan, response) => {
+                    log::debug!("Speech audio setup response received: {:?}", response);
+                }
                 AvChannelMessage::VideoFocusRequest(_chan, _m) => {
                     let mut m2 = Wifi::VideoFocusIndication::new();
                     m2.set_focus_mode(Wifi::video_focus_mode::Enum::FOCUSED);
@@ -94,7 +105,9 @@ impl ChannelHandlerTrait for SpeechAudioChannelHandler {
                         .write_frame(AvChannelMessage::VideoIndicationResponse(channel, m2).into())
                         .await?;
                 }
-                AvChannelMessage::VideoIndicationResponse(_, _) => unimplemented!(),
+                AvChannelMessage::VideoIndicationResponse(_, response) => {
+                    log::debug!("Speech audio focus indication received: {:?}", response);
+                }
                 AvChannelMessage::StartIndication(_, _) => {
                     main.start_output_audio(crate::AudioChannelType::Speech)
                         .await;
@@ -106,6 +119,6 @@ impl ChannelHandlerTrait for SpeechAudioChannelHandler {
             }
             return Ok(());
         }
-        todo!("{:x?}", msg);
+        Err(super::FrameIoError::SslSession(format!("Unrecognized speech-audio message on channel {}: {:x?}", channel, msg.data)))
     }
 }

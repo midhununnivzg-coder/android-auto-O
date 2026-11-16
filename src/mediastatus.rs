@@ -20,10 +20,31 @@ enum MediaStatusMessage {
 
 impl From<MediaStatusMessage> for AndroidAutoFrame {
     fn from(value: MediaStatusMessage) -> Self {
-        match value {
-            MediaStatusMessage::Playback(_, _) => todo!(),
-            MediaStatusMessage::Metadata(_, _) => todo!(),
-            MediaStatusMessage::Invalid => unimplemented!(),
+        let (channel, message_type, mut payload) = match value {
+            MediaStatusMessage::Playback(channel, message) => (
+                channel,
+                Wifi::media_info_channel_message::Enum::PLAYBACK,
+                message.write_to_bytes().unwrap_or_default(),
+            ),
+            MediaStatusMessage::Metadata(channel, message) => (
+                channel,
+                Wifi::media_info_channel_message::Enum::METADATA,
+                message.write_to_bytes().unwrap_or_default(),
+            ),
+            MediaStatusMessage::Invalid => (
+                0,
+                Wifi::media_info_channel_message::Enum::NONE,
+                Vec::new(),
+            ),
+        };
+        let mut data = (message_type as u16).to_be_bytes().to_vec();
+        data.append(&mut payload);
+        AndroidAutoFrame {
+            header: super::FrameHeader {
+                channel_id: channel,
+                frame: super::FrameHeaderContents::new(true, super::FrameHeaderType::Single, false),
+            },
+            data,
         }
     }
 }
@@ -32,26 +53,29 @@ impl TryFrom<&AndroidAutoFrame> for MediaStatusMessage {
     type Error = String;
     fn try_from(value: &AndroidAutoFrame) -> Result<Self, Self::Error> {
         use protobuf::Enum;
+        if value.data.len() < 2 {
+            return Err("Media-status frame is shorter than its 2-byte message type".to_string());
+        }
         let mut ty = [0u8; 2];
         ty.copy_from_slice(&value.data[0..2]);
         let ty = u16::from_be_bytes(ty);
         if let Some(sys) = Wifi::media_info_channel_message::Enum::from_i32(ty as i32) {
             match sys {
                 Wifi::media_info_channel_message::Enum::PLAYBACK => {
-                    let m = Wifi::MediaInfoChannelPlaybackData::parse_from_bytes(&value.data);
+                    let m = Wifi::MediaInfoChannelPlaybackData::parse_from_bytes(&value.data[2..]);
                     match m {
                         Ok(m) => Ok(Self::Playback(value.header.channel_id, m)),
                         Err(_) => Ok(Self::Invalid),
                     }
                 }
                 Wifi::media_info_channel_message::Enum::METADATA => {
-                    let m = Wifi::MediaInfoChannelMetadataData::parse_from_bytes(&value.data);
+                    let m = Wifi::MediaInfoChannelMetadataData::parse_from_bytes(&value.data[2..]);
                     match m {
                         Ok(m) => Ok(Self::Metadata(value.header.channel_id, m)),
                         Err(_) => Ok(Self::Invalid),
                     }
                 }
-                Wifi::media_info_channel_message::Enum::NONE => todo!(),
+                Wifi::media_info_channel_message::Enum::NONE => Err("Received empty media-status message".to_string()),
             }
         } else {
             Err(format!("Not converted message: {:x?}", value.data))
@@ -105,7 +129,9 @@ impl ChannelHandlerTrait for MediaStatusChannelHandler {
         let msg3: Result<AndroidAutoCommonMessage, String> = (&msg).try_into();
         if let Ok(msg2) = msg3 {
             match msg2 {
-                AndroidAutoCommonMessage::ChannelOpenResponse(_, _) => unimplemented!(),
+                AndroidAutoCommonMessage::ChannelOpenResponse(_, response) => {
+                    log::debug!("Channel-open response received: {:?}", response);
+                },
                 AndroidAutoCommonMessage::ChannelOpenRequest(_m) => {
                     let mut m2 = Wifi::ChannelOpenResponse::new();
                     m2.set_status(Wifi::status::Enum::OK);
@@ -118,6 +144,9 @@ impl ChannelHandlerTrait for MediaStatusChannelHandler {
             }
             return Ok(());
         }
-        todo!("{:?} {:?}", msg2, msg3);
+        Err(super::FrameIoError::SslSession(format!(
+            "Unrecognized media-status channel message on channel {}: {:x?}",
+            channel, msg.data
+        )))
     }
 }

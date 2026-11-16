@@ -84,7 +84,9 @@ impl ChannelHandlerTrait for VideoChannelHandler {
         let msg2: Result<AndroidAutoCommonMessage, String> = (&msg).try_into();
         if let Ok(msg2) = msg2 {
             match msg2 {
-                AndroidAutoCommonMessage::ChannelOpenResponse(_, _) => unimplemented!(),
+                AndroidAutoCommonMessage::ChannelOpenResponse(_, response) => {
+                    log::debug!("Channel-open response received: {:?}", response);
+                },
                 AndroidAutoCommonMessage::ChannelOpenRequest(m) => {
                     log::info!("Got channel open request for video: {:?}", m);
                     let mut m2 = Wifi::ChannelOpenResponse::new();
@@ -105,8 +107,15 @@ impl ChannelHandlerTrait for VideoChannelHandler {
         let msg2: Result<AvChannelMessage, String> = (&msg).try_into();
         if let Ok(msg2) = msg2 {
             match msg2 {
-                AvChannelMessage::AvChannelOpen(_chan, _m) => todo!(),
-                AvChannelMessage::MediaIndicationAck(_, _) => unimplemented!(),
+                AvChannelMessage::AvChannelOpen(_chan, request) => {
+                    return Err(super::FrameIoError::SslSession(format!("Unexpected AV input-open request on video channel: {:?}", request)));
+                }
+                AvChannelMessage::AvChannelOpenResponse(_, response) => {
+                    log::debug!("AV input-open response received: {:?}", response);
+                }
+                AvChannelMessage::MediaIndicationAck(_, ack) => {
+                    log::debug!("Video media acknowledgement received: {:?}", ack);
+                }
                 AvChannelMessage::MediaIndication(_chan, time, data) => {
                     main.receive_video(data, time).await;
                     let mut m2 = Wifi::AVMediaAckIndication::new();
@@ -139,7 +148,9 @@ impl ChannelHandlerTrait for VideoChannelHandler {
                         .write_frame(AvChannelMessage::VideoIndicationResponse(channel, m2).into())
                         .await?;
                 }
-                AvChannelMessage::SetupResponse(_chan, _m) => unimplemented!(),
+                AvChannelMessage::SetupResponse(_chan, response) => {
+                    log::debug!("Video setup response received: {:?}", response);
+                }
                 AvChannelMessage::VideoFocusRequest(_chan, m) => {
                     let mut m2 = Wifi::VideoFocusIndication::new();
                     main.set_focus(m.focus_mode() == Wifi::video_focus_mode::Enum::FOCUSED)
@@ -150,18 +161,23 @@ impl ChannelHandlerTrait for VideoChannelHandler {
                         .write_frame(AvChannelMessage::VideoIndicationResponse(channel, m2).into())
                         .await?;
                 }
-                AvChannelMessage::VideoIndicationResponse(_, _) => unimplemented!(),
+                AvChannelMessage::VideoIndicationResponse(_, indication) => {
+                    log::debug!("Video focus indication received: {:?}", indication);
+                }
                 AvChannelMessage::StartIndication(_chan, m) => {
                     let mut inner = self.inner.lock().unwrap();
                     inner.session = Some(m.session());
                 }
                 AvChannelMessage::StopIndication(_chan, _m) => {
-                    let mut inner = self.inner.lock().unwrap();
-                    inner.session.take();
+                    {
+                        let mut inner = self.inner.lock().unwrap();
+                        inner.session.take();
+                    }
+                    main.teardown_video().await;
                 }
             }
             return Ok(());
         }
-        todo!("{:x?}", msg);
+        Err(super::FrameIoError::SslSession(format!("Unrecognized video-channel message on channel {}: {:x?}", channel, msg.data)))
     }
 }

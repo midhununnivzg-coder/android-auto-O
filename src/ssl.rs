@@ -73,7 +73,7 @@ impl<U: AsyncWrite + Unpin> SslStreamThread<U> {
             }
             SslThreadData::HandshakeStart => {
                 if self.hs_started {
-                    unimplemented!();
+                    return Err("TLS handshake start was requested more than once".to_string());
                 } else {
                     let mut buf = Vec::new();
                     self.stream

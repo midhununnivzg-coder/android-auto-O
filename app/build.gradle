@@ -1,0 +1,37 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'org.androidauto.headunit'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'org.androidauto.headunit'
+        minSdk 29
+        targetSdk 29
+        ndk { abiFilters 'arm64-v8a' }
+        versionCode 2
+        versionName '0.2.0-projection-candidate'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+}
+
+
+dependencies {
+    implementation 'com.google.zxing:core:3.5.3'
+}

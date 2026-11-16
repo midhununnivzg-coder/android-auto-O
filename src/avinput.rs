@@ -46,7 +46,9 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
         let msg2: Result<AndroidAutoCommonMessage, String> = (&msg).try_into();
         if let Ok(msg2) = msg2 {
             match msg2 {
-                AndroidAutoCommonMessage::ChannelOpenResponse(_, _) => unimplemented!(),
+                AndroidAutoCommonMessage::ChannelOpenResponse(_, response) => {
+                    log::debug!("Channel-open response received: {:?}", response);
+                },
                 AndroidAutoCommonMessage::ChannelOpenRequest(_m) => {
                     let mut m2 = Wifi::ChannelOpenResponse::new();
                     m2.set_status(Wifi::status::Enum::OK);
@@ -63,21 +65,31 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
         if let Ok(msg2) = msg2 {
             log::info!("Received: {channel} {:?}", msg2);
             match msg2 {
-                AvChannelMessage::AvChannelOpen(_chan, m) => {
-                    if m.open() {
-                        main.open_input_channel()
-                            .await
-                            .map_err(|_| FrameIoError::AudioInputOpenError)?;
+                AvChannelMessage::AvChannelOpen(_chan, request) => {
+                    let accepted = if request.open() {
+                        main.open_input_channel().await.is_ok()
                     } else {
-                        main.close_input_channel()
-                            .await
-                            .map_err(|_| FrameIoError::AudioInputCloseError)?;
+                        main.close_input_channel().await.is_ok()
+                    };
+                    let mut response = Wifi::AVInputOpenResponse::new();
+                    response.set_session(1);
+                    response.set_value(if accepted { 1 } else { 0 });
+                    stream.write_frame(
+                        AvChannelMessage::AvChannelOpenResponse(channel, response).into(),
+                    ).await?;
+                    if !accepted {
+                        log::warn!("Head unit declined the requested microphone channel; projection remains active");
                     }
+                }
+                AvChannelMessage::AvChannelOpenResponse(_, response) => {
+                    log::debug!("AV input-open response received: {:?}", response);
                 }
                 AvChannelMessage::MediaIndicationAck(chan, ack) => {
                     main.audio_input_ack(chan, ack).await;
                 }
-                AvChannelMessage::MediaIndication(_chan, _timestamp, _data) => unimplemented!(),
+                AvChannelMessage::MediaIndication(_chan, timestamp, data) => {
+                    log::debug!("Audio-input media packet received ({} bytes, timestamp {:?}); no phone-to-HU capture sink is configured", data.len(), timestamp);
+                }
                 AvChannelMessage::SetupRequest(_chan, _m) => {
                     let mut m2 = Wifi::AVChannelSetupResponse::new();
                     m2.set_max_unacked(10);
@@ -87,9 +99,15 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
                         .write_frame(AvChannelMessage::SetupResponse(channel, m2).into())
                         .await?;
                 }
-                AvChannelMessage::SetupResponse(_chan, _m) => unimplemented!(),
-                AvChannelMessage::VideoFocusRequest(_chan, _m) => unimplemented!(),
-                AvChannelMessage::VideoIndicationResponse(_, _) => unimplemented!(),
+                AvChannelMessage::SetupResponse(_chan, response) => {
+                    log::debug!("Audio-input setup response received: {:?}", response);
+                }
+                AvChannelMessage::VideoFocusRequest(_chan, request) => {
+                    log::debug!("Audio-input channel focus request received: {:?}", request);
+                }
+                AvChannelMessage::VideoIndicationResponse(_, response) => {
+                    log::debug!("Audio-input channel focus indication received: {:?}", response);
+                }
                 AvChannelMessage::StartIndication(_, _) => {
                     main.start_input_audio().await;
                 }
@@ -99,6 +117,6 @@ impl ChannelHandlerTrait for AvInputChannelHandler {
             }
             return Ok(());
         }
-        todo!("{:x?}", msg);
+        Err(super::FrameIoError::SslSession(format!("Unrecognized audio-input channel message on channel {}: {:x?}", channel, msg.data)))
     }
 }
